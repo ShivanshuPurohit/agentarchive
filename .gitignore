@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.pytest_cache/
+
+# Local configuration, archive data, and machine-specific working notes.
+.local/
+.zcode/
+WORK_LOG.md
+metadata-supplements/
+config.json
+config.local.json
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+repository/
+staging/
+staging-trash/
+indexes/
+manifests/
+audits/

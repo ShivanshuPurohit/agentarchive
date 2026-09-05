@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050505">
+  <title>AgentArchive</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/chrome.css">
+  <link rel="stylesheet" href="/transcript.css">
+</head>
+<body class="sidebar-visible" data-mode="normal">
+  <aside id="sidebar" class="sidebar" aria-label="Archive navigation">
+    <header class="sidebar-header">
+      <button id="newSearchButton" class="brand" type="button" title="Show sessions">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span>AgentArchive</span>
+      </button>
+      <button id="closeSidebar" class="icon-button close-sidebar" type="button" aria-label="Close sidebar">×</button>
+    </header>
+
+    <nav class="view-tabs" aria-label="Browse archive">
+      <button data-tab="sessions" class="active" type="button">Sessions</button>
+      <button data-tab="evidence" type="button">Evidence</button>
+    </nav>
+
+    <label class="search-wrap">
+      <span class="search-icon" aria-hidden="true"></span>
+      <input id="searchInput" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search sessions" aria-label="Search sessions">
+      <kbd>⌘K</kbd>
+    </label>
+
+    <div class="filters">
+      <select id="harnessFilter" aria-label="Filter by harness">
+        <option value="">Claude + Codex</option>
+        <option value="claude">Claude</option>
+        <option value="codex">Codex</option>
+      </select>
+      <label class="children-toggle">
+        <input id="childrenFilter" type="checkbox">
+        <span>Subagents</span>
+      </label>
+    </div>
+
+    <div id="listMeta" class="list-meta" aria-live="polite">Loading sessions…</div>
+    <div id="sourceList" class="source-list" role="list"></div>
+    <button id="moreButton" class="load-sessions hidden" type="button">Load more</button>
+
+    <footer class="sidebar-footer">
+      <span class="local-dot" aria-hidden="true"></span>
+      <span>Local, read-only</span>
+    </footer>
+  </aside>
+
+  <button id="sidebarScrim" class="sidebar-scrim" type="button" aria-label="Close sidebar"></button>
+
+  <section class="workspace">
+    <header class="topbar">
+      <button id="openSidebar" class="icon-button menu-button" type="button" aria-label="Open sessions">
+        <span aria-hidden="true"></span>
+      </button>
+
+      <div class="session-heading">
+        <div class="title-line">
+          <span id="sessionTitle">AgentArchive</span>
+          <span id="harnessBadge" class="harness-badge"></span>
+        </div>
+        <div id="sessionMeta" class="session-meta"></div>
+      </div>
+
+      <div class="top-actions">
+        <span id="freshness" class="freshness"></span>
+        <button id="modeButton" class="mode-button" type="button" aria-haspopup="menu" aria-expanded="false">
+          <span id="modeLabel">Normal</span><span class="chevron" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div id="modeMenu" class="mode-menu hidden" role="menu" aria-label="Transcript view">
+        <div class="menu-title">Transcript view</div>
+        <button data-mode="normal" role="menuitem" type="button"><span>Normal</span><small>Conversation and tools</small></button>
+        <button data-mode="thinking" role="menuitem" type="button"><span>Thinking</span><small>Add readable reasoning</small></button>
+        <button data-mode="verbose" role="menuitem" type="button"><span>Verbose</span><small>Every stored event</small></button>
+        <button data-mode="summary" role="menuitem" type="button"><span>Summary</span><small>Messages only</small></button>
+        <div class="menu-hint"><kbd>⌃O</kbd> cycle views</div>
+      </div>
+    </header>
+
+    <main id="main" class="scroll-area">
+      <section id="empty" class="empty-state">
+        <div class="empty-mark" aria-hidden="true">A</div>
+        <h1>Your work, with the machinery intact.</h1>
+        <p>Choose a session, or search the evidence index across both harnesses.</p>
+      </section>
+
+      <nav id="pageTop" class="page-nav hidden" aria-label="Transcript pages">
+        <button data-page="previous" type="button"><span aria-hidden="true">↑</span> Earlier</button>
+        <span id="range"></span>
+        <button data-page="next" type="button">Later <span aria-hidden="true">↓</span></button>
+      </nav>
+
+      <article id="transcript" class="transcript" aria-live="polite"></article>
+
+      <nav id="pageBottom" class="page-nav page-nav-bottom hidden" aria-label="More transcript pages">
+        <button data-page="previous" type="button"><span aria-hidden="true">↑</span> Earlier</button>
+        <button data-page="next" type="button">Later <span aria-hidden="true">↓</span></button>
+      </nav>
+    </main>
+  </section>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

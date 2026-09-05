@@ -1,0 +1,254 @@
+.topbar {
+  position: absolute;
+  z-index: 20;
+  inset: 0 0 auto;
+  display: flex;
+  height: var(--topbar-height);
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  background: rgba(5, 5, 5, 0.9);
+  backdrop-filter: blur(12px);
+}
+
+.menu-button span,
+.menu-button span::before,
+.menu-button span::after {
+  display: block;
+  width: 13px;
+  height: 1px;
+  background: currentColor;
+  content: "";
+}
+
+.menu-button span::before {
+  transform: translateY(-4px);
+}
+
+.menu-button span::after {
+  transform: translateY(3px);
+}
+
+.sidebar-visible .menu-button {
+  visibility: hidden;
+}
+
+.session-heading {
+  min-width: 0;
+}
+
+.title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+#sessionTitle {
+  overflow: hidden;
+  color: #d9d7d1;
+  font-size: 12px;
+  font-weight: 570;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #171717;
+  color: #77756f;
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.harness-badge:empty {
+  display: none;
+}
+
+.session-meta {
+  max-width: min(60vw, 700px);
+  overflow: hidden;
+  color: #55544f;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: auto;
+}
+
+.freshness {
+  color: #5f5e59;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.freshness.live {
+  color: #8eaed8;
+}
+
+.freshness.live::before {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 7px rgba(110, 168, 247, 0.45);
+  content: "";
+}
+
+.mode-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #85837d;
+  font-size: 11px;
+}
+
+.mode-button:hover,
+.mode-button[aria-expanded="true"] {
+  background: var(--raised);
+  color: var(--text-soft);
+}
+
+.chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.mode-menu {
+  position: absolute;
+  z-index: 50;
+  top: 43px;
+  right: 13px;
+  width: 218px;
+  padding: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(21, 21, 20, 0.94);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(22px);
+}
+
+.menu-title {
+  padding: 5px 8px 7px;
+  color: #6e6d67;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mode-menu button {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 7px 26px 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+
+.mode-menu button:hover,
+.mode-menu button.active {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.mode-menu button.active::after {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--accent);
+  content: "✓";
+  font-size: 11px;
+}
+
+.mode-menu button span,
+.mode-menu button small {
+  display: block;
+}
+
+.mode-menu button span {
+  color: #d8d6cf;
+  font-size: 12px;
+}
+
+.mode-menu button small {
+  margin-top: 1px;
+  color: #6f6e68;
+  font-size: 10px;
+}
+
+.menu-hint {
+  margin: 5px 3px 0;
+  padding: 7px 6px 3px;
+  border-top: 1px solid var(--line);
+  color: #5f5e59;
+  font-size: 10px;
+}
+
+.menu-hint kbd {
+  margin-right: 6px;
+}
+
+.toast {
+  position: fixed;
+  z-index: 70;
+  bottom: 20px;
+  left: 50%;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: rgba(25, 25, 24, 0.96);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.65);
+  color: #d2d0c9;
+  font-size: 11px;
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px);
+}
+
+@media (max-width: 840px) {
+  .sidebar-visible .menu-button {
+    visibility: visible;
+  }
+
+  .session-meta,
+  .freshness {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    padding: 0 9px;
+  }
+
+  .mode-menu {
+    right: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
