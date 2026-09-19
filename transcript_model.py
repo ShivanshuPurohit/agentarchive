@@ -16,6 +16,9 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from transcript_media import MEDIA_TYPES, component_value, descriptors, redact_media_text
+from transcript_usage import UsageIndex
+
 MAX_RECORD = 32 * 1024 * 1024
 PREVIEW_CHARS = 6000
 OPAQUE_KEYS = {"encrypted_content", "signature"}
@@ -52,7 +55,7 @@ def flatten(value: Any) -> str:
         kind = value.get("type")
         if kind in {"text", "input_text", "output_text", "summary_text"}:
             return str(value.get("text") or "")
-        if kind in {"image", "document"}:
+        if kind in {"image", "input_image", "output_image", "image_url", "document", "audio", "input_audio", "output_audio", "video", "input_file"}:
             source = value.get("source") or {}
             media = source.get("media_type") if isinstance(source, dict) else None
             return f"[{kind}{': ' + media if media else ''}]"
@@ -72,7 +75,8 @@ def _codex_message_visibility(role: str, text: str, metadata: Any) -> str:
     lowered = text.lstrip().casefold()
     internal = isinstance(metadata, dict) and bool(metadata.get("kind") or metadata.get("hidden"))
     if internal or lowered.startswith(("<app-context>", "<permissions instructions>",
-                                       "<recommended_plugins>", "# agents.md instructions")):
+                                       "<recommended_plugins>", "<environment_context>",
+                                       "<user_instructions>", "# agents.md instructions")):
         return "verbose"
     return "summary"
 
@@ -110,7 +114,7 @@ def _claude(obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
     content = msg.get("content")
     blocks = content if isinstance(content, list) else []
     base = {"timestamp": ts, "model": msg.get("model"), "origin": "durable",
-            "event_id": obj.get("uuid")}
+            "event_id": obj.get("uuid"), "model_call_id": msg.get("id") if top == "assistant" else None}
     if top == "assistant":
         for i, block in enumerate(blocks):
             if not isinstance(block, dict):
@@ -136,6 +140,9 @@ def _claude(obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
             elif kind == "fallback":
                 out.append(_item(line, i, "boundary", flatten(block), role="system",
                                  visibility="summary", title="Model fallback", **base))
+            elif kind in MEDIA_TYPES:
+                out.append(_item(line, i, "attachment", flatten(block), role="assistant",
+                                 visibility="normal", title=kind.title(), **base))
             else:
                 out.append(_item(line, i, "metadata", json_text(block), role="system",
                                  visibility="verbose", title=str(kind or "Unknown block"), **base))
@@ -158,7 +165,7 @@ def _claude(obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
                 out.append(_item(line, i, "boundary" if compact else "message",
                                  str(block.get("text") or ""), role="system" if compact else "user",
                                  visibility="summary" if compact else visibility, **base))
-            elif kind in {"image", "document"}:
+            elif kind in MEDIA_TYPES:
                 out.append(_item(line, i, "attachment", flatten(block), role="user",
                                  visibility="normal", title=kind.title(), **base))
             else:
@@ -211,7 +218,8 @@ def _codex(obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
             return [_item(line, 0, kind, text, role=role,
                           visibility="thinking" if kind == "reasoning" else "summary", **base)]
         call_id = payload.get("call_id") or payload.get("event_id")
-        if call_id and event in {"exec_command_end", "patch_apply_end", "mcp_tool_call_end", "sub_agent_activity"}:
+        if call_id and event in {"exec_command_begin", "patch_apply_begin", "mcp_tool_call_begin",
+                                 "exec_command_end", "patch_apply_end", "mcp_tool_call_end", "sub_agent_activity"}:
             status: Optional[str] = None
             if event == "exec_command_end" and isinstance(payload.get("exit_code"), int):
                 status = "success" if payload["exit_code"] == 0 else "error"
@@ -222,7 +230,8 @@ def _codex(obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
                 status = "error" if isinstance(ok, dict) and ok.get("isError") else "success"
             text = json_text(payload)
             return [_item(line, 0, "tool_component", text, role="tool", visibility="normal",
-                          phase="lifecycle", call_id=call_id, tool_name=event, status=status,
+                          phase="start" if event.endswith("_begin") else "lifecycle",
+                          call_id=call_id, tool_name=event, status=status,
                           title=_call_title(event, payload), **base)]
         important = event in {"turn_aborted", "thread_rolled_back"}
         return [_item(line, 0, "boundary" if important else "metadata", json_text(payload),
@@ -277,7 +286,13 @@ def _codex(obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
 
 
 def normalize_record(harness: str, obj: Dict[str, Any], line: int) -> List[Dict[str, Any]]:
-    return _claude(obj, line) if harness == "claude" else _codex(obj, line)
+    items = _claude(obj, line) if harness == "claude" else _codex(obj, line)
+    for item in items:
+        media = descriptors(component_value(harness, obj, item["index"]))
+        if media:
+            item["media"] = media
+            item["text"] = redact_media_text(item["text"], component_value(harness, obj, item["index"]))
+    return items
 
 
 @dataclass
@@ -360,11 +375,13 @@ class SourceIndex:
             return
         self._metadata(obj, line == 1)
         canonical = False
-        for component in normalize_record(self.harness, obj, line):
+        components = normalize_record(self.harness, obj, line)
+        self.usage.consume(self.harness, obj, line, components, self.model)
+        for component in components:
             key = (line, int(component["index"]))
             event_id = str(component.get("event_id") or "")
             if event_id:
-                if event_id in self.seen_events:
+                if event_id in self.seen_events and self.seen_events[event_id] != line:
                     self.duplicates.add(key)
                 else:
                     self.seen_events[event_id] = line
@@ -402,6 +419,7 @@ class SourceIndex:
         self.canonical_lines = sorted(self.canonical_line_set)
 
     def _rebuild(self) -> None:
+        self.usage = UsageIndex()
         self.offsets, self.lengths = [0], [0]
         self.calls, self.component_calls, self.call_ids, self.active_calls = collections.defaultdict(list), {}, {}, {}
         self.durable, self.streams, self.mirrors = collections.defaultdict(list), [], set()
@@ -565,6 +583,7 @@ def transcript_page(index: SourceIndex, start: int, limit: int, focus: int = 0) 
                                "tool_name": (request or {}).get("tool_name"), "status": status,
                                "components": group_parts})
     components.sort(key=lambda item: (int(item["line"]), int(item["index"])))
+    index.usage.decorate(components, index.harness)
     next_line = available[position + limit] if position + limit < len(available) else None
     previous_line = available[max(0, position - limit)] if position > 0 else None
     return {"from_line": base_lines[0] if base_lines else start, "to_line": end,

@@ -23,3 +23,9 @@ staging-trash/
 indexes/
 manifests/
 audits/
+
+# Local client-code reference import and reproducible viewer build.
+viewer/node_modules/
+viewer/dist/
+viewer/vendor/
+viewer/claude/

@@ -152,7 +152,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     reasoning_parser.add_argument("--limit", type=int, default=8)
     reasoning_parser.add_argument("--json", action="store_true")
     serve_parser = sub.add_parser(
-        "serve", help="open the foreground localhost transcript and reasoning viewer"
+        "serve", aliases=["browse"], help="open the foreground localhost transcript and reasoning viewer"
     )
     serve_parser.add_argument("--port", type=int, default=0)
     serve_parser.add_argument("--no-open", action="store_true")
@@ -279,7 +279,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         f"{coordinate}: {item.get('excerpt','')}"
                     )
             return 0
-        elif args.command == "serve":
+        elif args.command in {"serve", "browse"}:
             if not 0 <= args.port <= 65535:
                 parser.error("--port must be between 0 and 65535")
             from transcript_viewer import serve

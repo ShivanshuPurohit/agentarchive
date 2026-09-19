@@ -11,9 +11,12 @@ portable reader also runs inside WSL.
 With Claude Code and Codex initialized on the machine, run:
 
 ```bash
+python3 scripts/import_claude_ui.py /path/to/refreshes/2026-09-17
+npm --prefix viewer ci
+npm --prefix viewer run build
 python3 agent_archive.py install --activate
 "$HOME/.local/bin/agent-archive" backup
-"$HOME/.local/bin/agent-archive" serve
+"$HOME/.local/bin/agent-archive" browse
 ```
 
 Installation creates private configuration under
@@ -92,6 +95,7 @@ agent-archive replica-verify /path/to/raw-replica-manifest.json.gz
 agent-archive capture --reason manual
 agent-archive search 'timeout AND retry'
 agent-archive reasoning 'rejected architecture'
+agent-archive browse
 agent-archive serve
 agent-archive serve --port 0 --no-open
 agent-archive context 'i:codex:BLOCK_ID' --max-chars 4000
@@ -161,7 +165,7 @@ reasoning/search/view behavior is now provided without a second content store.
 `agent_browse.py` remains for migration compatibility; rebuilding its separate
 database requires an explicit duplicate-data acknowledgement flag.
 
-`serve` starts a foreground, read-only viewer on a random `127.0.0.1` port and
+`browse` (also `serve`) starts a foreground, read-only viewer on a random `127.0.0.1` port and
 normally opens it in the browser. It never becomes a launchd job and stops on
 Ctrl-C. The existing catalogs provide global discovery and evidence search;
 the selected transcript is paged directly from its authoritative JSONL, so a
@@ -170,6 +174,13 @@ second content database. Normal, Thinking, Verbose, and Summary are view
 filters over one normalized event stream. Large item bodies load in bounded
 chunks, tool calls join to results by file-local call ID, and opaque reasoning
 is labeled rather than presented as recovered text.
+
+The viewer uses locally imported Claude presentation assets, collapsed readable
+tool results, rich code/terminal/diff/media rendering, small per-call token
+footers, and a turn analysis view for recorded input/cache/output/reasoning
+counts. See [viewer build, usage semantics, and validation](viewer/README.md).
+Building from source requires the pinned local capture; installed and portable
+runtimes already include the build and do not require Node.
 
 The persistent sidebar automatically loads every canonical top-level Claude
 and Codex chat, grouped by project; subagent and workflow rollouts are an

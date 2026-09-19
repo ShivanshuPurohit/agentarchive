@@ -18,17 +18,18 @@ def copy_runtime(source_root: pathlib.Path, destination: pathlib.Path) -> None:
         (source_root / name, pathlib.Path(name))
         for name in (
             "reasoning_index.py", "privacy_filter.py", "transcript_model.py",
-            "transcript_viewer.py",
+            "transcript_viewer.py", "transcript_media.py", "transcript_usage.py",
         )
     )
     package = source_root / "agentarchive"
     if not (package / "__init__.py").is_file():
         raise FileNotFoundError(f"AgentArchive runtime package is missing: {package}")
     files.extend((path, path.relative_to(source_root)) for path in sorted(package.glob("*.py")))
-    files.extend(
-        (path, path.relative_to(source_root))
-        for path in sorted((source_root / "viewer").iterdir()) if path.is_file()
-    )
+    viewer = source_root / "viewer" / "dist"
+    if not (viewer / "index.html").is_file():
+        raise FileNotFoundError("Build the viewer before packaging: cd viewer && npm ci && npm run build")
+    files.extend((path, path.relative_to(source_root)) for path in sorted(viewer.rglob("*"))
+                 if path.is_file() and not path.is_symlink())
     for source, relative in files:
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

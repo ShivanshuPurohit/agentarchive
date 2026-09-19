@@ -1,0 +1,154 @@
+/* Archive layout/adapters. Colors/type/controls come from the pinned Claude CSS. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  background: var(--cds-surface-1);
+  color: var(--cds-text-primary);
+  font-family: var(--cds-font-sans);
+  font-size: var(--cds-font-size-body);
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--cds-fill-accent);
+  outline-offset: 2px;
+}
+.archive-shell {
+  display: grid;
+  grid-template-columns: 304px minmax(0, 1fr);
+  height: 100%;
+}
+.archive-shell[data-sidebar="false"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.archive-shell[data-sidebar="false"] > .archive-sidebar {
+  display: none;
+}
+.archive-sidebar {
+  padding: 14px 12px 10px;
+  min-height: 0;
+}
+.archive-brand {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 8px 16px;
+  font-size: 16px;
+  font-weight: 500;
+}
+.archive-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--cds-text-secondary);
+  background: transparent;
+  border: 0;
+  flex-shrink: 0;
+}
+.archive-icon:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+.archive-switch {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px 10px;
+}
+.archive-switch button {
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: var(--cds-text-secondary);
+}
+.archive-switch [aria-pressed="true"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+}
+.archive-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: var(--cds-fill-field);
+  border: 1px solid var(--cds-border);
+  border-radius: 8px;
+  color: var(--cds-text-muted);
+}
+.archive-search input {
+  min-width: 0;
+  flex: 1;
+  outline: 0;
+  background: transparent;
+  font-size: 12px;
+}
+.archive-search kbd {
+  font-size: 10px;
+}
+.archive-filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 4px;
+  color: var(--cds-text-muted);
+  font-size: 11px;
+}
+.archive-filters select {
+  min-width: 0;
+  max-width: 140px;
+}
+.archive-filters label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.archive-session-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.archive-session {
+  font-size: var(--df-row-font);
+  margin-bottom: 2px;
+}
+.archive-sidebar-footer {
+  font-size: 11px;
+  color: var(--cds-text-muted);
+  padding: 10px 7px 0;
+}
+.archive-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid var(--cds-border);
+  font-size: 12px;
+}
+.archive-hit span {
+  color: var(--cds-text-muted);
+  font-size: 10px;
+}
+.archive-hit p {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

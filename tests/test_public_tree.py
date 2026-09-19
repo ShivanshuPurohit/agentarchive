@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 class PublicTreeTests(unittest.TestCase):
     def test_tracked_tree_contains_code_and_synthetic_examples_only(self):
-        result = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True)
+        result = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=ROOT, capture_output=True)
         if result.returncode:
             self.skipTest("Source archive has no Git index")
         private_roots = {".local", ".zcode", "metadata-supplements", "repository", "indexes", "manifests", "audits"}
@@ -22,6 +22,8 @@ class PublicTreeTests(unittest.TestCase):
             if not name:
                 continue
             relative = pathlib.Path(name)
+            if not (ROOT / relative).exists():  # A deleted working-tree file is not published.
+                continue
             with self.subTest(path=name):
                 self.assertNotIn(relative.parts[0], private_roots)
                 self.assertNotIn(name, {"WORK_LOG.md", "config.json", "config.local.json", ".env"})

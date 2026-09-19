@@ -77,6 +77,12 @@ class WorkspaceExclusionTests(unittest.TestCase):
         self.assertIn(paths["public_claude"].name, staged)
         self.assertIn(paths["public_codex"].name, staged)
         self.assertTrue(any("claude=1" in item and "codex=1" in item for item in warnings))
+        conn = aa.connect_catalog(self.config)
+        try:
+            aa.index_capture(self.config, conn, stage, "viewer-inventory", [])
+            conn.commit()
+        finally:
+            conn.close()
         self.assertEqual(aa.search_archive(self.config, ids["private_codex"]), [])
         owners = {source.owner for source in Registry(self.config).sources.values()}
         self.assertNotIn(ids["private_claude"], owners)

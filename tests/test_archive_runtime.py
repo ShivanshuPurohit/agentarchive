@@ -60,6 +60,13 @@ class ArchiveRuntimeTests(unittest.TestCase):
                 definition.update(paths=[], sqlite=[])
             aa.stage_sources(cfg, stage)
             self.assertTrue((stage / "data/agentarchive/agentarchive/indexing.py").is_file())
+            env = os.environ.copy()
+            env.pop("PYTHONPATH", None)
+            subprocess.run(
+                [sys.executable, "-c", "import transcript_viewer"],
+                cwd=stage / "data/agentarchive", env=env,
+                capture_output=True, text=True, check=True,
+            )
 
     def test_portable_export_copies_a_runnable_package(self):
         with tempfile.TemporaryDirectory() as temp:

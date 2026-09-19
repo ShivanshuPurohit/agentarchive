@@ -1,5 +1,6 @@
 import json
 import pathlib
+import sqlite3
 import tempfile
 import unittest
 
@@ -131,7 +132,18 @@ class TranscriptModelTests(unittest.TestCase):
         write_jsonl(codex / "session_index.jsonl", [{"id": "22222222-2222-2222-2222-222222222222", "thread_name": "Codex title"}])
         config = {"state_root": str(self.root / "state"), "legacy_indexes": [], "sources": {
             "claude": {"root": str(claude)}, "codex": {"root": str(codex)}}}
+        state = self.root / "state"
+        state.mkdir()
+        with sqlite3.connect(state / 'catalog.sqlite') as conn:
+            conn.execute('CREATE TABLE sessions (harness TEXT,session_id TEXT,cwd TEXT)')
+            conn.execute('INSERT INTO sessions VALUES (?,?,?)', ('codex', '22222222-2222-2222-2222-222222222222', '/tmp/project'))
+            conn.execute('CREATE TABLE indexed_files (harness TEXT,relpath TEXT)')
+            for harness, root, path in [('claude', claude, cpath), ('claude', claude, child), ('codex', codex, kpath)]:
+                conn.execute('INSERT INTO indexed_files VALUES (?,?)', (harness, str(path.relative_to(root))))
+        unindexed = codex / 'sessions' / 'unindexed.jsonl'
+        write_jsonl(unindexed, [{'type': 'session_meta', 'payload': {'id': 'unindexed'}}])
         registry = Registry(config)
+        self.assertIsNone(registry.route_path(str(unindexed)))
         claude_rows = registry.sessions("Custom title", "claude", False, "", 10)["sessions"]
         codex_rows = registry.sessions("Codex title", "codex", False, "", 10)["sessions"]
         self.assertEqual(claude_rows[0]["title"], "Custom title")

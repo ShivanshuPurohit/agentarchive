@@ -1,0 +1,29 @@
+{
+  "name": "agentarchive-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "@shikijs/langs": "4.4.3",
+    "@xterm/xterm": "6.0.0",
+    "acorn": "8.18.0",
+    "ansi_up": "6.0.6",
+    "diff": "8.0.4",
+    "dompurify": "3.4.15",
+    "katex": "0.16.33",
+    "markdown-it": "14.3.2",
+    "mermaid": "11.17.2",
+    "papaparse": "5.7.0",
+    "pdfjs-dist": "6.3.289",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "shiki": "4.4.3"
+  },
+  "devDependencies": {
+    "prettier": "3.8.1",
+    "vite": "8.3.0"
+  }
+}

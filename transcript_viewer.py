@@ -9,6 +9,7 @@ import hashlib
 import http.cookies
 import http.server
 import json
+import mimetypes
 import pathlib
 import re
 import secrets
@@ -22,6 +23,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from privacy_filter import transcript_is_excluded, workspace_is_excluded
 from transcript_model import IndexCache, flatten, transcript_page
+from transcript_media import load_asset
 
 REGISTRY_REFRESH_SECONDS = 300
 
@@ -180,6 +182,16 @@ class Registry:
         self._build()
 
     def _overlays(self) -> tuple[Dict[str, Dict[str, str]], Dict[str, str], Dict[tuple, Dict[str, Any]]]:
+        recent: Dict[tuple, Dict[str, Any]] = {}
+        db = pathlib.Path(self.config["state_root"]) / "catalog.sqlite"
+        if db.is_file():
+            conn = _readonly(db)
+            try:
+                for row in conn.execute("SELECT * FROM sessions"):
+                    if not workspace_is_excluded(self.config, row["cwd"]):
+                        recent[(row["harness"], row["session_id"])] = dict(row)
+            finally:
+                conn.close()
         claude: Dict[str, Dict[str, str]] = {}
         root = pathlib.Path(self.config["sources"]["claude"]["root"]).expanduser()
         history = root / "history.jsonl"
@@ -206,17 +218,8 @@ class Registry:
                 for raw in handle:
                     with contextlib.suppress(UnicodeDecodeError, json.JSONDecodeError):
                         row = json.loads(raw)
-                        if row.get("id") and row.get("thread_name"):
+                        if ("codex", row.get("id")) in recent and row.get("thread_name"):
                             codex[str(row["id"])] = str(row["thread_name"])
-        recent: Dict[tuple, Dict[str, Any]] = {}
-        db = pathlib.Path(self.config["state_root"]) / "catalog.sqlite"
-        if db.is_file():
-            conn = _readonly(db)
-            try:
-                for row in conn.execute("SELECT * FROM sessions"):
-                    recent[(row["harness"], row["session_id"])] = dict(row)
-            finally:
-                conn.close()
         return claude, codex, recent
 
     def _add(self, source: Source) -> None:
@@ -231,52 +234,62 @@ class Registry:
         self.by_path[canonical] = source.source_id
 
     def _add_live(self, claude: Dict[str, Dict[str, str]], codex: Dict[str, str], recent: Dict[tuple, Dict[str, Any]]) -> None:
-        for harness in ("claude", "codex"):
-            root = pathlib.Path(self.config["sources"][harness]["root"]).expanduser().resolve()
-            bases = [root / "projects"] if harness == "claude" else [root / "sessions", root / "archived_sessions"]
-            for base in bases:
-                if not base.is_dir():
-                    continue
-                for path in base.rglob("*.jsonl"):
-                    if not path.is_file() or transcript_is_excluded(self.config, path):
-                        continue
-                    rel = path.relative_to(root).as_posix()
-                    first = _first_json(path)
-                    if harness == "claude":
-                        child = "/subagents/" in f"/{rel}" or "/workflows/" in f"/{rel}"
-                        workflow = "/workflows/" in f"/{rel}"
-                        owner = str(first.get("agentId") or path.stem) if child else path.stem
-                        root_id = str(first.get("sessionId") or path.stem)
-                        prefix = _claude_prefix(path) if not child else {}
-                        overlay = claude.get(root_id, {})
-                        first_message = first.get("message") if isinstance(first.get("message"), dict) else {}
-                        child_title = _prompt_title(flatten(first_message.get("content"))) if child else ""
-                        title = (prefix.get("custom") or prefix.get("ai") or overlay.get("title")
-                                 or prefix.get("prompt") or child_title or str(first.get("slug") or ""))
-                        project = overlay.get("project") or prefix.get("cwd") or ""
-                        kind = "workflow" if workflow else ("subagent" if child else "main")
-                        model, updated = prefix.get("model", ""), prefix.get("started", "") or _iso_mtime(path)
-                        parent = ""
-                    else:
-                        payload = first.get("payload") if isinstance(first.get("payload"), dict) else first
-                        owner = str(payload.get("id") or path.stem)
-                        root_id = str(payload.get("session_id") or owner)
-                        parent = str(payload.get("parent_thread_id") or payload.get("forked_from_id") or "")
-                        source_kind = str(payload.get("source") or payload.get("thread_source") or "")
-                        kind = "subagent" if source_kind == "subagent" else "main"
-                        row = recent.get((harness, owner), {})
-                        title = _prompt_title(codex.get(owner) or str(row.get("first_prompt") or ""))
-                        project = str(row.get("cwd") or payload.get("cwd") or "")
-                        model = str(row.get("model") or "")
-                        updated = str(row.get("ended_utc") or row.get("started_utc") or _iso_mtime(path))
-                        source_kind = payload.get("source") or payload.get("thread_source")
-                        if isinstance(source_kind, dict) or source_kind == "subagent" or parent:
-                            kind = "subagent"
-                        if not title and kind == "main":
-                            title = _codex_prompt(path)
-                    self._add(Source("", harness, path, rel, owner, root_id, parent, kind,
-                                     "archived" if "archived_sessions" in rel else "live",
-                                     title, project, model, updated))
+        database = pathlib.Path(self.config["state_root"]) / "catalog.sqlite"
+        if not database.is_file():
+            return
+        conn = _readonly(database)
+        try:
+            coordinates = list(conn.execute("SELECT harness,relpath FROM indexed_files"))
+        finally:
+            conn.close()
+        for coordinate in coordinates:
+            harness, rel = coordinate["harness"], coordinate["relpath"]
+            if harness not in ("claude", "codex") or not rel.endswith(".jsonl"):
+                continue
+            captured = harness == "claude" and rel.startswith("claude/")
+            root = (pathlib.Path(self.config["state_root"]) / "inbox" if captured else
+                    pathlib.Path(self.config["sources"][harness]["root"]).expanduser()).resolve()
+            path = (root / rel).resolve()
+            if root not in path.parents:
+                continue
+            if not path.is_file() or transcript_is_excluded(self.config, path):
+                continue
+            first = _first_json(path)
+            if harness == "claude":
+                child = "/subagents/" in f"/{rel}" or "/workflows/" in f"/{rel}" or bool(first.get("agentId"))
+                workflow = "/workflows/" in f"/{rel}"
+                owner = str(first.get("agentId") or path.stem) if child else str(first.get("sessionId") or path.stem)
+                root_id = str(first.get("sessionId") or path.stem)
+                prefix = _claude_prefix(path) if not child else {}
+                overlay = claude.get(root_id, {})
+                first_message = first.get("message") if isinstance(first.get("message"), dict) else {}
+                child_title = _prompt_title(flatten(first_message.get("content"))) if child else ""
+                title = (prefix.get("custom") or prefix.get("ai") or overlay.get("title")
+                         or prefix.get("prompt") or child_title or str(first.get("slug") or ""))
+                project = overlay.get("project") or prefix.get("cwd") or ""
+                kind = "workflow" if workflow else ("subagent" if child else "main")
+                model, updated = prefix.get("model", ""), prefix.get("started", "") or _iso_mtime(path)
+                parent = ""
+            else:
+                payload = first.get("payload") if isinstance(first.get("payload"), dict) else first
+                owner = str(payload.get("id") or path.stem)
+                root_id = str(payload.get("session_id") or owner)
+                parent = str(payload.get("parent_thread_id") or payload.get("forked_from_id") or "")
+                source_kind = str(payload.get("source") or payload.get("thread_source") or "")
+                kind = "subagent" if source_kind == "subagent" else "main"
+                row = recent.get((harness, owner), {})
+                title = _prompt_title(codex.get(owner) or str(row.get("first_prompt") or ""))
+                project = str(row.get("cwd") or payload.get("cwd") or "")
+                model = str(row.get("model") or "")
+                updated = str(row.get("ended_utc") or row.get("started_utc") or _iso_mtime(path))
+                source_kind = payload.get("source") or payload.get("thread_source")
+                if isinstance(source_kind, dict) or source_kind == "subagent" or parent:
+                    kind = "subagent"
+                if not title and kind == "main":
+                    title = _codex_prompt(path)
+            self._add(Source("", harness, path, rel, owner, root_id, parent, kind,
+                             "captured" if captured else "archived" if "archived_sessions" in rel else "live",
+                             title, project, model, updated))
 
     def _legacy_claude_path(self, database: pathlib.Path, relpath: str) -> Optional[pathlib.Path]:
         with contextlib.suppress(IndexError):
@@ -295,15 +308,18 @@ class Registry:
             conn = _readonly(database)
             try:
                 if entry["harness"] == "claude":
-                    rows = conn.execute("SELECT relpath FROM files WHERE kind='main_session'")
+                    rows = conn.execute("SELECT relpath,kind FROM files WHERE kind IN ('main_session','subagent')")
                     for row in rows:
                         path = self._legacy_claude_path(database, row["relpath"])
                         if not path or transcript_is_excluded(self.config, path):
                             continue
-                        owner = path.stem
+                        first = _first_json(path)
+                        child = row["kind"] == "subagent"
+                        owner = str(first.get("agentId") or path.stem) if child else path.stem
+                        root = str(first.get("sessionId") or owner)
                         prefix, overlay = _claude_prefix(path), claude.get(owner, {})
-                        self._add(Source("", "claude", path, str(row["relpath"]), owner, owner,
-                                         kind="main", storage="legacy",
+                        self._add(Source("", "claude", path, str(row["relpath"]), owner, root,
+                                         parent=root if child else "", kind="subagent" if child else "main", storage="legacy",
                                          title=(prefix.get("custom") or prefix.get("ai") or overlay.get("title")
                                                 or prefix.get("prompt", "")),
                                          project=overlay.get("project") or prefix.get("cwd", ""),
@@ -313,12 +329,16 @@ class Registry:
                     rows = conn.execute("SELECT relpath,source_path,thread_id,root_thread_id,end_timestamp FROM files")
                     for row in rows:
                         path = pathlib.Path(row["source_path"])
-                        if transcript_is_excluded(self.config, path):
+                        if not path.is_file() or transcript_is_excluded(self.config, path):
                             continue
                         owner = str(row["thread_id"])
+                        header = _first_json(path).get("payload", {})
+                        parent = str(header.get("parent_thread_id") or header.get("forked_from_id") or "")
                         self._add(Source("", "codex", path, str(row["relpath"]), owner,
-                                         str(row["root_thread_id"] or owner), kind="main", storage="legacy",
+                                         str(row["root_thread_id"] or owner), parent=parent,
+                                         kind="subagent" if parent else "main", storage="legacy",
                                          title=_prompt_title(codex.get(owner, "")) or _codex_prompt(path),
+                                         project=str(header.get("cwd") or ""),
                                          updated=str(row["end_timestamp"] or _iso_mtime(path))))
             finally:
                 conn.close()
@@ -369,7 +389,7 @@ class Registry:
 
     def sessions(self, query: str, harness: str, children: bool, cursor: str, limit: int) -> Dict[str, Any]:
         self.maybe_refresh()
-        priorities = {"live": 3, "archived": 2, "legacy": 1}
+        priorities = {"live": 4, "archived": 3, "captured": 2, "legacy": 1}
         canonical: Dict[tuple, Source] = {}
         with self._refresh_lock:
             sources = tuple(self.sources.values())
@@ -400,12 +420,13 @@ class ViewerState:
         self.token = secrets.token_urlsafe(32)
         self.authority = ""
         self.lock = threading.RLock()
-        root = pathlib.Path(__file__).resolve().with_name("viewer")
-        self.assets = {"/": ("text/html; charset=utf-8", (root / "index.html").read_bytes()),
-                       "/styles.css": ("text/css; charset=utf-8", (root / "styles.css").read_bytes()),
-                       "/chrome.css": ("text/css; charset=utf-8", (root / "chrome.css").read_bytes()),
-                       "/transcript.css": ("text/css; charset=utf-8", (root / "transcript.css").read_bytes()),
-                       "/app.js": ("text/javascript; charset=utf-8", (root / "app.js").read_bytes())}
+        root = pathlib.Path(__file__).resolve().with_name("viewer") / "dist"
+        if not (root / "index.html").is_file():
+            raise RuntimeError("Viewer build missing. See viewer/README.md: import Claude assets, npm ci, npm run build.")
+        self.assets = {"/" + path.relative_to(root).as_posix():
+                       (mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
+                       for path in root.rglob("*") if path.is_file() and not path.is_symlink()}
+        self.assets["/"] = self.assets["/index.html"]
 
     def status(self) -> Dict[str, Any]:
         db = pathlib.Path(self.config["state_root"]) / "catalog.sqlite"
@@ -456,7 +477,7 @@ def _handler(state: ViewerState) -> type[http.server.BaseHTTPRequestHandler]:
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(length))
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Cross-Origin-Resource-Policy", "same-origin")
@@ -474,7 +495,7 @@ def _handler(state: ViewerState) -> type[http.server.BaseHTTPRequestHandler]:
             if self.headers.get("Host") != state.authority:
                 return False
             jar = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
-            value = jar.get("agent_archive_viewer")
+            value = jar.get("agent_archive_viewer_" + state.authority.rsplit(":", 1)[-1])
             return bool(value and secrets.compare_digest(value.value, state.token))
 
         def do_HEAD(self) -> None:
@@ -490,7 +511,8 @@ def _handler(state: ViewerState) -> type[http.server.BaseHTTPRequestHandler]:
                 if secrets.compare_digest(query["token"][0], state.token):
                     self.send_response(303)
                     self.send_header("Location", "/")
-                    self.send_header("Set-Cookie", f"agent_archive_viewer={state.token}; HttpOnly; SameSite=Strict; Path=/")
+                    cookie_name = "agent_archive_viewer_" + state.authority.rsplit(":", 1)[-1]
+                    self.send_header("Set-Cookie", f"{cookie_name}={state.token}; HttpOnly; SameSite=Strict; Path=/")
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
                     return
@@ -532,7 +554,20 @@ def _handler(state: ViewerState) -> type[http.server.BaseHTTPRequestHandler]:
                     source = state.registry.source(tail[0])
                     with state.lock:
                         index = state.cache.get(source.harness, source.path)
-                        if len(tail) == 2 and tail[1] == "item":
+                        if len(tail) == 2 and tail[1] == "usage":
+                            result = index.usage.public(_bounded_int(query, "line", 1, 1, max(1, index.line_count)),
+                                                        _bounded_int(query, "after", 0, 0, max(1, index.line_count)))
+                            result["parse_errors"] = index.parse_errors
+                            self._json(result)
+                        elif len(tail) == 2 and tail[1] == "media":
+                            media, raw = load_asset(state.config, index,
+                                                   _bounded_int(query, "line", 1, 1, max(1, index.line_count)),
+                                                   _bounded_int(query, "index", 0, 0, 10000),
+                                                   _bounded_int(query, "asset", 0, 0, 63))
+                            self._headers(200, media, len(raw))
+                            if self.command != "HEAD":
+                                self.wfile.write(raw)
+                        elif len(tail) == 2 and tail[1] == "item":
                             line = _bounded_int(query, "line", 1, 1, max(1, index.line_count))
                             number = _bounded_int(query, "index", 0, 0, 10000)
                             offset = _bounded_int(query, "offset", 0, 0, 2 ** 31 - 1)
@@ -550,6 +585,11 @@ def _handler(state: ViewerState) -> type[http.server.BaseHTTPRequestHandler]:
                                                    _bounded_int(query, "limit", 120, 20, 200),
                                                    _bounded_int(query, "focus_line", 0, 0, max(1, index.line_count)))
                             page.update({"source": source.public(), "freshness": state.source_status(source)})
+                            with state.registry._refresh_lock:
+                                family = [s.public() for s in state.registry.sources.values()
+                                          if s.harness == source.harness and s.source_id != source.source_id
+                                          and (s.root == source.root or s.parent == source.owner or s.owner == source.parent)]
+                            page["related"] = list({s["session_id"]: s for s in reversed(family)}.values())[:100]
                             self._json(page)
                         else:
                             raise KeyError("unknown endpoint")

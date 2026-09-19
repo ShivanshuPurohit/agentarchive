@@ -75,6 +75,8 @@ def stage_sources(config: Dict[str, Any], stage: pathlib.Path) -> List[str]:
         ("privacy_filter.py", configuration.state_root(config) / "bin" / "privacy_filter.py"),
         ("transcript_model.py", configuration.state_root(config) / "bin" / "transcript_model.py"),
         ("transcript_viewer.py", configuration.state_root(config) / "bin" / "transcript_viewer.py"),
+        ("transcript_media.py", configuration.state_root(config) / "bin" / "transcript_media.py"),
+        ("transcript_usage.py", configuration.state_root(config) / "bin" / "transcript_usage.py"),
         ("viewer", configuration.state_root(config) / "bin" / "viewer"),
         ("README.md", configuration.state_root(config) / "README.md"),
         ("START_HERE.md", configuration.state_root(config) / "START_HERE.md"),
