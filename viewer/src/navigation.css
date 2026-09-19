@@ -1,4 +1,4 @@
-/* Archive layout/adapters. Colors/type/controls come from the pinned Claude CSS. */
+/* Sidebar and navigation layout. */
 html,
 body,
 #root {
@@ -7,10 +7,10 @@ body,
   overflow: hidden;
 }
 body {
-  background: var(--cds-surface-1);
-  color: var(--cds-text-primary);
-  font-family: var(--cds-font-sans);
-  font-size: var(--cds-font-size-body);
+  background: var(--ui-surface-1);
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-sans);
+  font-size: var(--ui-font-size-body);
 }
 button,
 input,
@@ -28,7 +28,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 summary:focus-visible {
-  outline: 2px solid var(--cds-fill-accent);
+  outline: 2px solid var(--ui-fill-accent);
   outline-offset: 2px;
 }
 .archive-shell {
@@ -61,13 +61,13 @@ summary:focus-visible {
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  color: var(--cds-text-secondary);
+  color: var(--ui-text-secondary);
   background: transparent;
   border: 0;
   flex-shrink: 0;
 }
 .archive-icon:hover {
-  background: var(--cds-fill-ghost-hover);
+  background: var(--ui-fill-ghost-hover);
 }
 .archive-switch {
   display: flex;
@@ -77,21 +77,21 @@ summary:focus-visible {
 .archive-switch button {
   padding: 5px 10px;
   border-radius: 6px;
-  color: var(--cds-text-secondary);
+  color: var(--ui-text-secondary);
 }
 .archive-switch [aria-pressed="true"] {
-  background: var(--cds-fill-ghost-selected);
-  color: var(--cds-text-primary);
+  background: var(--ui-fill-ghost-selected);
+  color: var(--ui-text-primary);
 }
 .archive-search {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 7px 9px;
-  background: var(--cds-fill-field);
-  border: 1px solid var(--cds-border);
+  background: var(--ui-fill-field);
+  border: 1px solid var(--ui-border);
   border-radius: 8px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
 }
 .archive-search input {
   min-width: 0;
@@ -108,7 +108,7 @@ summary:focus-visible {
   gap: 8px;
   align-items: center;
   margin: 10px 4px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   font-size: 11px;
 }
 .archive-filters select {
@@ -126,12 +126,12 @@ summary:focus-visible {
   min-height: 0;
 }
 .archive-session {
-  font-size: var(--df-row-font);
+  font-size: 14px;
   margin-bottom: 2px;
 }
 .archive-sidebar-footer {
   font-size: 11px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   padding: 10px 7px 0;
 }
 .archive-hit {
@@ -139,11 +139,11 @@ summary:focus-visible {
   width: 100%;
   text-align: left;
   padding: 10px;
-  border-bottom: 1px solid var(--cds-border);
+  border-bottom: 1px solid var(--ui-border);
   font-size: 12px;
 }
 .archive-hit span {
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   font-size: 10px;
 }
 .archive-hit p {

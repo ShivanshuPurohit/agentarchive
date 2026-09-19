@@ -2,6 +2,10 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .pytest_cache/
+.venv/
+build/
+dist/
+*.egg-info/
 
 # Local configuration, archive data, and machine-specific working notes.
 .local/
@@ -24,8 +28,8 @@ indexes/
 manifests/
 audits/
 
-# Local client-code reference import and reproducible viewer build.
+# Local reference assets and generated viewer builds.
 viewer/node_modules/
 viewer/dist/
 viewer/vendor/
-viewer/claude/
+agentarchive/web/

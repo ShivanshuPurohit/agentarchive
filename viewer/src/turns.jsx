@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Icon } from "../claude/primitives.js";
+import { Icon } from "./ui.jsx";
 import "./turns.css";
 
 const short = (n) =>

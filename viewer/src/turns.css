@@ -2,7 +2,7 @@
   max-width: 1080px;
   margin: auto;
   padding: 30px 34px;
-  color: var(--cds-text-primary);
+  color: var(--ui-text-primary);
 }
 .archive-analysis-heading {
   display: flex;
@@ -15,7 +15,7 @@
   font-weight: 500;
 }
 .archive-analysis-heading p {
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -24,15 +24,15 @@
   align-items: center;
   gap: 14px;
   font-size: 12px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
 }
 .archive-turn-picker select {
   max-width: calc(100% - 100px);
-  border: 1px solid var(--cds-border);
+  border: 1px solid var(--ui-border);
   border-radius: 6px;
   padding: 8px;
-  background: var(--cds-surface-2);
-  color: var(--cds-text-primary);
+  background: var(--ui-surface-2);
+  color: var(--ui-text-primary);
 }
 .archive-turn-prompt {
   margin-top: 24px;
@@ -44,14 +44,14 @@
   flex-wrap: wrap;
   gap: 18px;
   margin: 12px 0 26px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   font-size: 12px;
 }
 .archive-turn-counts button {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--cds-text-accent);
+  color: var(--ui-text-accent);
 }
 .archive-metrics {
   display: grid;
@@ -60,8 +60,8 @@
   margin-bottom: 26px;
 }
 .archive-metric {
-  background: var(--cds-alpha-1);
-  border: 1px solid var(--cds-border);
+  background: var(--ui-alpha-1);
+  border: 1px solid var(--ui-border);
   border-radius: 10px;
   padding: 14px;
   display: flex;
@@ -70,7 +70,7 @@
 }
 .archive-metric > span {
   font-size: 11px;
-  color: var(--cds-text-secondary);
+  color: var(--ui-text-secondary);
 }
 .archive-metric strong {
   font-size: 26px;
@@ -78,7 +78,7 @@
 }
 .archive-metric small {
   font-size: 10px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
 }
 .archive-calls-table {
   overflow: auto;
@@ -93,13 +93,13 @@
 .archive-calls-table th {
   font-weight: 500;
   text-align: left;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   font-size: 11px;
   white-space: nowrap;
   padding: 10px;
 }
 .archive-calls-table td {
-  border-top: 1px solid var(--cds-border);
+  border-top: 1px solid var(--ui-border);
   padding: 12px 10px;
   vertical-align: top;
 }
@@ -107,7 +107,7 @@
 .archive-calls-table td small {
   display: block;
   font-size: 10px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   margin-top: 3px;
 }
 .archive-calls-table button {
@@ -120,16 +120,16 @@
   width: 22px;
   height: 22px;
   border-radius: 5px;
-  background: var(--cds-alpha-1);
+  background: var(--ui-alpha-1);
   display: grid;
   place-items: center;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
 }
 .archive-token-bar {
   min-width: 110px;
   height: 6px;
   margin-top: 9px;
-  background: var(--cds-alpha-1);
+  background: var(--ui-alpha-1);
   border-radius: 2px;
 }
 .archive-token-bar > div {
@@ -144,15 +144,15 @@
 }
 .archive-token-bar.input > div,
 .archive-usage-legend .uncached {
-  background: var(--cds-text-accent);
+  background: var(--ui-text-accent);
 }
 .archive-token-bar.input span,
 .archive-usage-legend .cached {
-  background: var(--cds-text-success);
+  background: var(--ui-text-success);
 }
 .archive-token-bar.output > div,
 .archive-usage-legend .output {
-  background: var(--cds-text-secondary);
+  background: var(--ui-text-secondary);
 }
 .archive-token-bar.output span,
 .archive-usage-legend .reasoning {
@@ -163,7 +163,7 @@
   gap: 18px;
   flex-wrap: wrap;
   font-size: 10px;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   margin-bottom: 14px;
 }
 .archive-usage-legend span {
@@ -179,11 +179,11 @@
 .archive-usage-note {
   font-size: 11px;
   line-height: 1.6;
-  color: var(--cds-text-muted);
+  color: var(--ui-text-muted);
   margin-top: 18px;
 }
 .archive-usage-caveat {
-  color: var(--cds-text-warning);
+  color: var(--ui-text-warning);
 }
 @media (max-width: 750px) {
   .archive-turn-analysis {

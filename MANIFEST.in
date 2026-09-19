@@ -1,0 +1,9 @@
+include README.md CONFIGURATION.md CROSS_DEVICE.md CONTRIBUTING.md pyproject.toml uv.lock setup.py .gitignore
+include .github/workflows/check.yml
+recursive-include agentarchive *.py
+recursive-include agentarchive/web *
+recursive-include scripts *.py *.sh *.md
+recursive-include tests *.py *.js
+include viewer/package.json viewer/package-lock.json viewer/index.html viewer/vite.config.js viewer/README.md
+recursive-include viewer/src *.js *.jsx *.css
+global-exclude __pycache__ *.py[cod] .DS_Store

@@ -6,7 +6,10 @@ import pathlib
 import shutil
 
 
-
+def viewer_root(source_root: pathlib.Path) -> pathlib.Path:
+    """Find packaged assets or an older installed runtime's viewer."""
+    packaged = source_root / "agentarchive" / "web"
+    return packaged if (packaged / "index.html").is_file() else source_root / "viewer" / "dist"
 
 def copy_runtime(source_root: pathlib.Path, destination: pathlib.Path) -> None:
     """Copy the complete query runtime without caches or machine config."""
@@ -25,10 +28,10 @@ def copy_runtime(source_root: pathlib.Path, destination: pathlib.Path) -> None:
     if not (package / "__init__.py").is_file():
         raise FileNotFoundError(f"AgentArchive runtime package is missing: {package}")
     files.extend((path, path.relative_to(source_root)) for path in sorted(package.glob("*.py")))
-    viewer = source_root / "viewer" / "dist"
+    viewer = viewer_root(source_root)
     if not (viewer / "index.html").is_file():
         raise FileNotFoundError("Build the viewer before packaging: cd viewer && npm ci && npm run build")
-    files.extend((path, path.relative_to(source_root)) for path in sorted(viewer.rglob("*"))
+    files.extend((path, pathlib.Path("agentarchive/web") / path.relative_to(viewer)) for path in sorted(viewer.rglob("*"))
                  if path.is_file() and not path.is_symlink())
     for source, relative in files:
         target = destination / relative

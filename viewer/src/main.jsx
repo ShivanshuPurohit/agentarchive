@@ -6,13 +6,14 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
-import { GroupLabel, Icon } from "../claude/primitives.js";
+import { GroupLabel, Icon } from "./ui.jsx";
 import { Fields, Message, Tool } from "./renderers.jsx";
 import { parse } from "./model.js";
 import { Activity } from "./activity.jsx";
 import { Attachments } from "./media.jsx";
 import { TurnAnalysis } from "./turns.jsx";
 import { TokenBadge } from "./usage.jsx";
+import "./base.css";
 import "./viewer.css";
 import "katex/dist/katex.min.css";
 import "@xterm/xterm/css/xterm.css";
@@ -46,7 +47,7 @@ function IconButton({ name, label, onClick }) {
 function SessionGroup({ name, sources, selected, onSelect }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
-    <section className="group/section">
+    <section className="archive-session-group">
       <GroupLabel
         kind="group"
         collapsed={collapsed}
@@ -62,11 +63,11 @@ function SessionGroup({ name, sources, selected, onSelect }) {
             data-selected={
               selected === source.source_id ? "focused" : undefined
             }
-            className="archive-session w-full shrink-0 border-none text-left text-secondary flex items-center gap-[var(--df-row-gap)] h-[var(--df-row-h)] px-[var(--df-row-px)] rounded-[var(--df-radius-pill)] hover:bg-[var(--df-hover)] data-[selected=focused]:bg-[var(--df-selected)] data-[selected=focused]:text-primary"
+            className="archive-session"
             title={source.title}
             onClick={() => onSelect(source.source_id)}
           >
-            <span className="df-leading-slot">
+            <span className="archive-leading-slot">
               <Icon
                 name={source.harness === "claude" ? "Chat" : "Code"}
                 size="sm"
@@ -317,13 +318,13 @@ function App() {
   );
   return (
     <div
-      className={`archive-shell dframe-root ${glass ? "archive-glass" : ""}`}
+      className={`archive-shell ${glass ? "archive-glass" : ""}`}
       data-variant="desktop"
       data-frame-mode="code"
       data-sidebar={sidebar}
     >
       <aside
-        className="archive-sidebar dframe-sidebar dframe-nav-scroll"
+        className="archive-sidebar"
         data-density="comfortable"
         data-variant="desktop"
         aria-label="Archive navigation"
@@ -406,8 +407,8 @@ function App() {
           {sessions.length} of {total} sessions · local archive
         </footer>
       </aside>
-      <section className="archive-workspace epitaxy-root">
-        <header className="archive-topbar df-titlebar">
+      <section className="archive-workspace archive-root">
+        <header className="archive-topbar">
           <div className="archive-heading">
             <IconButton
               name="Sidebar"
@@ -522,7 +523,7 @@ function App() {
               </p>
             </div>
           ) : (
-            <article className="archive-transcript epitaxy-transcript-typography">
+            <article className="archive-transcript archive-transcript-typography">
               <nav className="archive-pagination">
                 {page.previous_line ? (
                   <button

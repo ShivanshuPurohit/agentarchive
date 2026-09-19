@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentarchive"
+version = "1.6.1"
+description = "Local coding-agent history, searchable evidence, and readable rollouts"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+classifiers = [
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.scripts]
+agent-archive = "agent_archive:main"
+
+[tool.setuptools]
+packages = ["agentarchive"]
+py-modules = [
+    "agent_archive", "agent_browse", "privacy_filter", "reasoning_index",
+    "transcript_model", "transcript_viewer", "transcript_media", "transcript_usage",
+]
+include-package-data = false
+
+[tool.setuptools.package-data]
+agentarchive = ["web/*", "web/assets/*"]

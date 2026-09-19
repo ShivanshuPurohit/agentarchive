@@ -126,7 +126,9 @@ def install(config_path: pathlib.Path, activate: bool = False) -> Dict[str, Any]
     source_root = DEFAULT_SOURCE_ROOT
     runtime.copy_runtime(source_root, state / "bin")
     portable_exporter = state / "bin" / "export-portable-state"
-    portable_source = source_root / "scripts" / "export_portable_state.py"
+    portable_source = source_root / "agentarchive" / "portable.py"
+    if not portable_source.is_file():
+        portable_source = source_root / "scripts" / "export_portable_state.py"
     if not portable_source.is_file():
         portable_source = source_root / "export-portable-state"
     if portable_source.resolve() != portable_exporter.resolve():

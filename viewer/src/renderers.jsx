@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import { createTwoFilesPatch } from "diff";
-import { Icon, FieldList } from "../claude/primitives.js";
-import { step } from "../claude/recipes.js";
+import { Icon, FieldList } from "./ui.jsx";
 import {
   displayValue,
   elapsed,
@@ -213,7 +212,7 @@ export function Markdown({ text = "" }) {
     }
     return nodes;
   }
-  return <div className="archive-prose epitaxy-markdown">{children()}</div>;
+  return <div className="archive-prose archive-markdown">{children()}</div>;
 }
 export function Fields({ value }) {
   if (value == null) return null;
@@ -441,13 +440,12 @@ export function Tool({ item, source, verbose = false }) {
   }
   return (
     <div
-      data-cds="TurnStatusStep"
+      data-ui="TurnStatusStep"
       data-state={tool.status}
       className="archive-tool flex w-full min-w-0 flex-col"
     >
       <button
-        className={`archive-step group/step ${step.row} ${step.control} ${step.spacing} ${step.outset}`}
-        style={{ "--cds-outset-x": "var(--cds-pad-xs)" }}
+        className="archive-step"
         aria-expanded={open}
         onClick={toggle}
       >
@@ -485,7 +483,7 @@ export function Tool({ item, source, verbose = false }) {
         <Icon name="CaretDown" size="xs" className={open ? "rotate-180" : ""} />
       </button>
       {open && (
-        <div className="archive-tool-panel" data-cds-row-panel="">
+        <div className="archive-tool-panel" data-ui-row-panel="">
           {error && <div role="alert">{error}</div>}
           {loading && (
             <div className="text-muted">Loading full stored content…</div>

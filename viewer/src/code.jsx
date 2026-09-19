@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { AnsiUp } from "ansi_up";
-import { Icon } from "../claude/primitives.js";
-import { lightTheme, darkTheme } from "../claude/themes.js";
+import { Icon } from "./ui.jsx";
+import lightTheme from "@shikijs/themes/github-light";
+import darkTheme from "@shikijs/themes/github-dark";
 
 let highlight;
 async function colorCode(text, lang) {
@@ -43,7 +44,7 @@ async function colorCode(text, lang) {
     }[lang] || lang;
   return engine.codeToHtml(text, {
     lang: engine.getLoadedLanguages().includes(language) ? language : "text",
-    themes: { light: "claude-light", dark: "claude-dark" },
+    themes: { light: "github-light", dark: "github-dark" },
   });
 }
 export function Code({ text = "", language = "text", filename }) {
@@ -61,9 +62,9 @@ export function Code({ text = "", language = "text", filename }) {
     };
   }, [text, language]);
   return (
-    <div className="archive-code epitaxy-codeblock relative max-w-full w-full">
+    <div className="archive-code archive-codeblock relative max-w-full w-full">
       <div
-        className="epitaxy-diff epitaxy-fence rounded-lg overflow-clip"
+        className="archive-diff archive-fence rounded-lg overflow-clip"
         data-code-text={text}
       >
         {html ? (

@@ -102,6 +102,7 @@ from agentarchive.offsite import configure_offsite
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     sub = parser.add_subparsers(dest="command", required=True)
     install_parser = sub.add_parser("install", help="install code, config, hook, repository, and launchd plists")

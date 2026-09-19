@@ -19,6 +19,7 @@ import zlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from transcript_model import IndexCache
 from transcript_viewer import Source, ViewerState, _handler
+from agentarchive.runtime import viewer_root
 
 
 def png():
@@ -106,7 +107,7 @@ step,input,output
         state.registry, state.cache, state.config = registry, IndexCache(), {'excluded_workspaces': []}
         state.lock, state.token = threading.RLock(), 'synthetic-preview'
         state.source_status = lambda source: {'live_delta': False}
-        build = pathlib.Path(__file__).resolve().parents[1] / 'viewer/dist'
+        build = viewer_root(pathlib.Path(__file__).resolve().parents[1])
         import mimetypes
         state.assets = {'/' + p.relative_to(build).as_posix(): (mimetypes.guess_type(p.name)[0] or 'application/octet-stream', p.read_bytes()) for p in build.rglob('*') if p.is_file()}
         state.assets['/'] = state.assets['/index.html']

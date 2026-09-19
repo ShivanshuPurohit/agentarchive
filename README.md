@@ -5,18 +5,20 @@ AgentArchive continuously preserves local Claude Code and Codex work without rel
 ## Quick start
 
 The capture service targets macOS with APFS, Python 3.9 or newer, and `restic`
-available on `PATH`. The application uses Python's standard library. The
-portable reader also runs inside WSL.
+available on `PATH`. The Python runtime uses only the standard library. Use `uv` for the development
+environment and local package installation. Building the viewer requires Node.js
+22.12 or newer; installed wheels include the viewer and do not require Node.
+The portable reader also runs inside WSL.
 
 With Claude Code and Codex initialized on the machine, run:
 
 ```bash
-python3 scripts/import_claude_ui.py /path/to/refreshes/2026-09-17
+uv sync --locked
 npm --prefix viewer ci
 npm --prefix viewer run build
-python3 agent_archive.py install --activate
-"$HOME/.local/bin/agent-archive" backup
-"$HOME/.local/bin/agent-archive" browse
+uv run agent-archive install --activate
+uv run agent-archive backup
+uv run agent-archive browse
 ```
 
 Installation creates private configuration under
@@ -24,6 +26,31 @@ Installation creates private configuration under
 source locations, workspace exclusions, historical indexes, or custom service
 identities. Fresh installations scan retained history without a date cutoff.
 See [CONFIGURATION.md](CONFIGURATION.md) for configuration and upgrade details.
+
+## Local package and development
+
+```bash
+uv sync --locked
+uv run agent-archive --version
+uv run python -m unittest discover -s tests
+npm --prefix viewer test
+npm --prefix viewer ci
+npm --prefix viewer run build
+uv build
+uv tool install .
+```
+
+`uv build` produces a source archive and wheel in `dist/`. Build the viewer first;
+the build refuses to create an incomplete distribution. Both archives include the
+viewer assets and third-party notices. Neither includes local configuration,
+transcripts, private working files, or Git history. Nothing is uploaded by these
+commands. Package metadata explicitly blocks PyPI uploads for now.
+
+The console command, `python -m agentarchive`, and the existing
+`python agent_archive.py` entrypoint use the same implementation. The legacy
+`agent_browse.py` utility remains available for migration compatibility.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and release preparation.
 
 ## Code layout
 
@@ -43,7 +70,7 @@ existing Python consumers. The `agentarchive/` package contains the implementati
 
 The existing standalone reasoning index, privacy filter, and transcript viewer
 remain separate. Tests are grouped by behavior; run them with
-`python3 -m unittest discover -s tests`.
+`uv run python -m unittest discover -s tests`.
 
 It has four deliberately separate layers:
 
@@ -182,12 +209,10 @@ filters over one normalized event stream. Large item bodies load in bounded
 chunks, tool calls join to results by file-local call ID, and opaque reasoning
 is labeled rather than presented as recovered text.
 
-The viewer uses locally imported Claude presentation assets, collapsed readable
-tool results, rich code/terminal/diff/media rendering, small per-call token
-footers, and a turn analysis view for recorded input/cache/output/reasoning
-counts. See [viewer build, usage semantics, and validation](viewer/README.md).
-Building from source requires the pinned local capture; installed and portable
-runtimes already include the build and do not require Node.
+The viewer provides collapsed readable tool results, rich code/terminal/diff/media
+rendering, small per-call token footers, and turn analysis for recorded
+input/cache/output/reasoning counts. It builds from this checkout and the locked
+frontend dependencies. See [viewer build, usage semantics, and validation](viewer/README.md).
 
 The persistent sidebar automatically loads every canonical top-level Claude
 and Codex chat, grouped by project; subagent and workflow rollouts are an

@@ -51,11 +51,9 @@ they do not establish a kernel bottleneck.
 
 ## Presentation and rich content
 
-The local build imports the pinned Claude `index-CWWbECaL` capture: original
-theme CSS, typography, icon font, Icon/GroupLabel/FieldList functions, status-row
-class recipes, and Claude syntax-color themes. `src/` adapts archive records to
-those presentation primitives. React hosts the view; MarkdownIt, Shiki, xterm,
-KaTeX, Mermaid, PDF.js, Papa Parse, and jsdiff handle content rendering.
+The viewer uses local React components, platform fonts, and a neutral dark/light
+theme. MarkdownIt, Shiki, xterm, KaTeX, Mermaid, PDF.js, Papa Parse, and jsdiff
+handle content rendering. Dependency license notices ship with each build.
 
 Supported content includes Markdown tables/lists, highlighted code, edit/patch
 diffs, ANSI output and terminal cursor controls, Mermaid and math fences,
@@ -72,38 +70,32 @@ current file because it can differ from the historic rollout. There is no
 arbitrary-path file endpoint. Text and original JSON remain available on demand.
 
 Dark/light themes and optional CSS glass navigation are available in the header.
-Glass is a web effect, not Apple's native Liquid Glass material. This is a
-selective port of the captured Claude presentation, not a claim of complete
-pixel/interaction parity across all Claude app states.
+Glass is a web effect, not Apple's native Liquid Glass material.
 
 ## Build and package
 
-The extracted first-party files stay local and are ignored by Git. A source
-checkout therefore needs the pinned capture to build the viewer. Installed and
-portable runtimes contain the built viewer and need only Python at runtime.
+Build from a clean checkout using the locked npm dependencies:
 
 ```sh
-python3 scripts/import_claude_ui.py /path/to/refreshes/2026-09-17
+uv sync --locked
 npm --prefix viewer ci
 npm --prefix viewer run build
-python3 agent_archive.py browse
+uv run agent-archive browse
+uv build
 ```
 
-The import records source hashes, function coordinates, and adaptations in
-`viewer/claude/provenance.json`. It verifies captured asset hashes and changes
-only CDN URLs in the imported CSS. The build emits `viewer/dist`; runtime
-installation/export copies that tree, not Node modules or the source capture.
-Rebuilding requires restarting the foreground viewer, which holds a fixed
-allowlist of that build's assets. The importer is intentionally pinned to this
-capture; a new Claude build needs a reviewed import update.
+The build emits `agentarchive/web`, which is included in wheels, source archives,
+installed runtimes, and portable exports. Python serves those packaged assets;
+Node is only needed for development. Rebuilding requires restarting the foreground
+viewer, which holds a fixed allowlist of that build's assets.
 
 ## Validation
 
 ```sh
-python3 -m unittest discover -s tests
+uv run python -m unittest discover -s tests
 npm --prefix viewer test
 npm --prefix viewer run build
-python3 tests/serve_viewer_fixture.py
+uv run python tests/serve_viewer_fixture.py
 ```
 
 The last command prints a local URL for a temporary synthetic source through

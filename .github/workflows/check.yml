@@ -1,0 +1,31 @@
+name: Check package
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.23"
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: viewer/package-lock.json
+      - run: uv sync --locked
+      - run: npm --prefix viewer ci
+      - run: npm --prefix viewer test
+      - run: npm --prefix viewer run build
+      - run: uv run python -m unittest discover -s tests
+      - run: uv build
+      - run: uv run python scripts/check_distribution.py dist/*
+      - run: |
+          uv venv /tmp/archive-wheel
+          uv pip install --python /tmp/archive-wheel/bin/python dist/*.whl
+          cd /tmp
+          /tmp/archive-wheel/bin/agent-archive --version
+          /tmp/archive-wheel/bin/python -m agentarchive --help

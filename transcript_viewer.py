@@ -420,9 +420,10 @@ class ViewerState:
         self.token = secrets.token_urlsafe(32)
         self.authority = ""
         self.lock = threading.RLock()
-        root = pathlib.Path(__file__).resolve().with_name("viewer") / "dist"
+        from agentarchive.runtime import viewer_root
+        root = viewer_root(pathlib.Path(__file__).resolve().parent)
         if not (root / "index.html").is_file():
-            raise RuntimeError("Viewer build missing. See viewer/README.md: import Claude assets, npm ci, npm run build.")
+            raise RuntimeError("Viewer build missing. Run npm --prefix viewer ci && npm --prefix viewer run build.")
         self.assets = {"/" + path.relative_to(root).as_posix():
                        (mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
                        for path in root.rglob("*") if path.is_file() and not path.is_symlink()}
