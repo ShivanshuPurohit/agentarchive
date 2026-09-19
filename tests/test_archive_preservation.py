@@ -172,8 +172,17 @@ class ArchivePreservationTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIs(result["capture"], captured)
         self.assertIs(result["verify"], verified)
-        capture_mock.assert_called_once_with({}, "manual-user-request")
-        verify_mock.assert_called_once_with({})
+        capture_mock.assert_called_once_with({}, "manual-user-request", check_repository=False)
+        verify_mock.assert_called_once_with({}, catalog_snapshot_checked=True)
+
+    def test_backup_does_not_reuse_a_failed_capture_check_or_hide_verify_failure(self):
+        for captured_status, verified_status in (("failed", "ok"), ("complete", "failed")):
+            with self.subTest(capture=captured_status, verify=verified_status):
+                with mock.patch.object(capture, "capture", return_value={"status": captured_status}):
+                    with mock.patch.object(capture, "verify_archive", return_value={"status": verified_status}) as verify_mock:
+                        result = aa.backup_archive({}, "test")
+                self.assertEqual(result["status"], "failed")
+                verify_mock.assert_called_once_with({}, catalog_snapshot_checked=captured_status == "complete")
 
     def test_backup_uses_explicit_parent_snapshot(self):
         previous = "a" * 64

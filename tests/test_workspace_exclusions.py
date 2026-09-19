@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import agent_archive as aa
+import privacy_filter
 from privacy_filter import transcript_is_excluded, workspace_is_excluded
 from transcript_viewer import Registry
 
@@ -101,6 +102,15 @@ class WorkspaceExclusionTests(unittest.TestCase):
         self.assertEqual(result["status"], "excluded_workspace")
         self.assertFalse(any((self.root / "state" / "queue").iterdir()))
         self.assertFalse((self.root / "state" / "inbox").exists())
+
+    def test_repeated_public_metadata_does_not_hide_a_later_excluded_workspace(self):
+        path = self.root / "mixed.jsonl"
+        rows = [{"cwd": str(self.root / "public")}] * 100
+        rows.append({"payload": {"workspace_roots": [str(self.private / "nested")]}})
+        write_jsonl(path, rows)
+        with mock.patch.object(privacy_filter, "workspace_is_excluded", wraps=workspace_is_excluded) as checked:
+            self.assertTrue(transcript_is_excluded(self.config, path))
+        self.assertEqual(checked.call_count, 2)
 
     def test_tool_call_refresh_does_not_reintroduce_excluded_transcripts(self):
         _, paths = self.fixtures()

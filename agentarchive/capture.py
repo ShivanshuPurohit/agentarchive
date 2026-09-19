@@ -18,6 +18,8 @@ def capture(
     config: Dict[str, Any],
     reason: str,
     refresh_legacy_documents: bool = True,
+    *,
+    check_repository: bool = True,
 ) -> Dict[str, Any]:
     state = configuration.state_root(config)
     utils.progress("capture: preparing current live sources (prior staging trees are not scanned)")
@@ -120,13 +122,14 @@ def capture(
         # Refresh the live entry point only after the snapshot is durable so
         # its freshness timestamp never advertises an incomplete capture.
         reports.render_start_here(config, conn)
-        check, lock_recovery = storage.restic_repository_check(config, ["check"])
-        utils.progress("capture: repository metadata check complete")
-        check_status = "ok" if check.returncode == 0 else "failed"
-        check_detail = " ".join(
-            value for value in (lock_recovery, check.stdout, check.stderr) if value
-        )
-        catalog.record_health(conn, "restic-metadata", check_status, utils.compact(check_detail, 1000))
+        if check_repository:
+            check, lock_recovery = storage.restic_repository_check(config, ["check"])
+            utils.progress("capture: repository metadata check complete")
+            check_status = "ok" if check.returncode == 0 else "failed"
+            check_detail = " ".join(
+                value for value in (lock_recovery, check.stdout, check.stderr) if value
+            )
+            catalog.record_health(conn, "restic-metadata", check_status, utils.compact(check_detail, 1000))
         result = {
             "capture_id": current_capture,
             "status": status,
@@ -187,13 +190,17 @@ def import_legacy(config: Dict[str, Any], name: str = "legacy-workspaces-pre-ded
         conn.close()
 
 
-def verify_archive(config: Dict[str, Any], read_data: bool = False) -> Dict[str, Any]:
+def verify_archive(config: Dict[str, Any], read_data: bool = False, *, catalog_snapshot_checked: bool = False) -> Dict[str, Any]:
     conn = catalog.connect_catalog(config)
     checks: Dict[str, Any] = {}
     try:
-        utils.progress("verify: checking the current SQLite catalog")
-        catalog_result = conn.execute("PRAGMA quick_check").fetchone()
-        checks["catalog"] = catalog_result[0] if catalog_result else "no result"
+        if catalog_snapshot_checked:
+            utils.progress("verify: captured SQLite catalog already passed its integrity check")
+            checks["catalog"] = "ok"
+        else:
+            utils.progress("verify: checking the current SQLite catalog")
+            catalog_result = conn.execute("PRAGMA quick_check").fetchone()
+            checks["catalog"] = catalog_result[0] if catalog_result else "no result"
         args = ["check"]
         if read_data:
             partition = (dt.datetime.now().timetuple().tm_yday % 30) + 1
@@ -232,7 +239,8 @@ def verify_archive(config: Dict[str, Any], read_data: bool = False) -> Dict[str,
         status = "ok" if all(value == "ok" or isinstance(value, int) and value >= 3650 for value in checks.values()) else "failed"
         catalog.record_health(conn, "full-verify" if read_data else "verify", status, json.dumps(checks, sort_keys=True))
         reports.render_status(config, conn)
-        result = {"status": status, "checks": checks}
+        result = {"status": status, "checks": checks,
+                  "catalog_basis": "checked capture snapshot" if catalog_snapshot_checked else "live catalog"}
         if lock_recovery:
             result["lock_recovery"] = lock_recovery
         utils.progress(f"verify: complete ({status})")
@@ -243,9 +251,11 @@ def verify_archive(config: Dict[str, Any], read_data: bool = False) -> Dict[str,
 
 def backup_archive(config: Dict[str, Any], reason: str) -> Dict[str, Any]:
     """Run the normal manual capture and verification as one operation."""
-    captured = capture(config, reason)
-    verified = verify_archive(config)
+    # The capture checks its consistent catalog copy before storing it. Verify
+    # that backup once, rather than rescanning the live catalog and repo twice.
+    captured = capture(config, reason, check_repository=False)
     capture_ok = captured.get("status") in SUCCESSFUL_CAPTURE_STATUSES
+    verified = verify_archive(config, catalog_snapshot_checked=capture_ok)
     return {
         "status": "ok" if capture_ok and verified.get("status") == "ok" else "failed",
         "capture": captured,

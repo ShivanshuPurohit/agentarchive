@@ -49,6 +49,7 @@ def transcript_is_excluded(
     if not excluded_roots(config):
         return False
     consumed = 0
+    checked_workspaces = set()
     try:
         with path.open("rb") as handle:
             while consumed < ceiling:
@@ -58,11 +59,13 @@ def transcript_is_excluded(
                 consumed += len(raw)
                 with contextlib.suppress(UnicodeDecodeError, json.JSONDecodeError):
                     event = json.loads(raw)
-                    if isinstance(event, dict) and any(
-                        workspace_is_excluded(config, value)
-                        for value in _workspace_values(event)
-                    ):
-                        return True
+                    if isinstance(event, dict):
+                        for value in _workspace_values(event):
+                            if value in checked_workspaces:
+                                continue
+                            checked_workspaces.add(value)
+                            if workspace_is_excluded(config, value):
+                                return True
     except OSError:
         return False
     return False

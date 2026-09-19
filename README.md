@@ -114,6 +114,13 @@ restores the recorded sentinel. Repository checks automatically run Restic's
 stale-only `unlock` and retry once after lock exit code 11; active locks remain
 locked and make the command fail.
 
+Manual backup validates the consistent catalog snapshot before storing it and
+runs the repository check once during final verification. Its result labels
+`verify.catalog_basis` as `checked capture snapshot`; standalone `verify` checks
+the current live catalog. This avoids two full catalog scans and two repository
+checks in one backup without omitting the captured-catalog integrity check or
+sentinel restore.
+
 Search is deliberately two-stage and token-bounded. The first command returns
 at most eight deduplicated 18-token snippets by default, prefers all-signal
 matches, and uses broad OR retrieval only when the strict query has no result.
