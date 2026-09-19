@@ -25,10 +25,6 @@ source locations, workspace exclusions, historical indexes, or custom service
 identities. Fresh installations scan retained history without a date cutoff.
 See [CONFIGURATION.md](CONFIGURATION.md) for configuration and upgrade details.
 
-To keep native Claude main-agent and subagent thinking summaries requested,
-see the optional [local summary policy](scripts/CLAUDE_SUMMARIES.md). It is
-installed separately from the archive and applies to new Claude processes.
-
 ## Code layout
 
 `agent_archive.py` is the command entrypoint and a compatibility facade for
