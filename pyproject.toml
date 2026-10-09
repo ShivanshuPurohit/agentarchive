@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentarchive"
-version = "1.6.1"
+version = "1.7.0"
 description = "Local coding-agent history, searchable evidence, and readable rollouts"
 readme = "README.md"
 requires-python = ">=3.9"

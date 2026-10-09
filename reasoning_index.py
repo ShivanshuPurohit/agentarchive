@@ -295,8 +295,9 @@ def search(conn: sqlite3.Connection, match: str, limit: int) -> List[Dict[str, A
     rows = conn.execute(
         """
         SELECT p.payload_id,o.session_id,o.source_relpath,o.line_no,o.timestamp,o.kind,
-               snippet(reasoning_fts,0,'[',']','…',18) AS excerpt,
-               bm25(reasoning_fts) AS bm25_score,
+               snippet(reasoning_fts,0,'[',']','…',40) AS excerpt,
+               rank AS bm25_score,p.text_sha256,
+               length(p.text) AS _chars,substr(p.text,1,3000) AS _prefix,
                (SELECT COUNT(*) FROM reasoning_occurrences c
                 WHERE c.payload_id=p.payload_id) AS occurrence_count
         FROM reasoning_fts
@@ -306,7 +307,7 @@ def search(conn: sqlite3.Connection, match: str, limit: int) -> List[Dict[str, A
             WHERE c.payload_id=p.payload_id
         )
         WHERE reasoning_fts MATCH ?
-        ORDER BY bm25(reasoning_fts)
+        ORDER BY rank
         LIMIT ?
         """,
         (match, limit),

@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Sequence
 
 
 
-VERSION = "1.6.1"
+VERSION = "1.7.0"
 LABEL_CAPTURE = "org.agentarchive.capture"
 LABEL_VERIFY = "org.agentarchive.verify"
 KEYCHAIN_SERVICE = "org.agentarchive.restic-local"

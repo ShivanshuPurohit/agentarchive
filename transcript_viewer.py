@@ -45,7 +45,7 @@ def _readonly(path: pathlib.Path) -> sqlite3.Connection:
             conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=60)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA query_only=ON")
-            conn.execute("SELECT 1").fetchone()
+            conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
             return conn
         except sqlite3.OperationalError as exc:
             last = exc

@@ -308,7 +308,7 @@ def render_start_here(config: Dict[str, Any], conn: sqlite3.Connection) -> None:
         f"{cli} status",
         "```",
         "",
-        "Search is a terse routing step (eight deduplicated 18-token hit cards by default). Its text view uses compact session coordinates; selected `context` output and `search --json` retain full provenance. Expand only a selected hit ID or incremental raw coordinate; do not ingest a whole transcript or raise the character budget speculatively.",
+        "Search is a terse routing step (eight deduplicated 40-token hit cards by default). Its text view uses compact session coordinates; selected `context` output and `search --json` retain full provenance. Expand only a selected hit ID or incremental raw coordinate; do not ingest a whole transcript or raise the character budget speculatively.",
         "",
         "Summaries route; raw archived evidence decides. Authentication files and browser credentials are deliberately excluded from capture.",
     ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import concurrent.futures
 import datetime as dt
 import json
 import pathlib
@@ -12,6 +13,22 @@ from typing import Any, Dict
 
 from . import catalog, common as utils, config as configuration, indexing, reports, staging, storage
 from .common import SUCCESSFUL_CAPTURE_STATUSES
+
+
+def backup_checked_stage(config, conn, stage, current_capture):
+    """Overlap independent reads of an immutable snapshot, never skip validation."""
+    evidence = catalog.backup_catalog_to_stage(conn, stage, validate=False)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        checked = pool.submit(catalog.validate_catalog_snapshot, stage / "meta/catalog.sqlite")
+        utils.progress("capture: validating catalog while writing the local recovery snapshot")
+        snapshot = storage.backup_stage(config, stage, current_capture)
+        # Retain the durable snapshot coordinate even if validation fails.
+        # The capture remains non-successful until both operations complete.
+        conn.execute("UPDATE captures SET restic_snapshot=? WHERE capture_id=?", (snapshot, current_capture))
+        conn.commit()
+        checked.result()
+    evidence["integrity"] = "ok"
+    return snapshot, evidence
 
 
 def capture(
@@ -91,9 +108,7 @@ def capture(
             reports.index_legacy_documents(config, conn)
         reports.render_start_here(config, conn)
         utils.progress("capture: incremental indexes complete; writing consistent catalog snapshot")
-        catalog.backup_catalog_to_stage(conn, stage)
-        utils.progress("capture: writing deduplicated local recovery snapshot")
-        local_snapshot = storage.backup_stage(config, stage, current_capture)
+        local_snapshot, catalog_snapshot = backup_checked_stage(config, conn, stage, current_capture)
         offsite_snapshot = None
         status = "complete"
         offsite = config.get("offsite") or {}
@@ -138,6 +153,7 @@ def capture(
             "counts": counters,
             "indexing": index_counts,
             "reasoning": reasoning_counts,
+            "catalog_snapshot": catalog_snapshot,
             "warnings": warnings,
         }
         utils.write_json(state / "latest.json", result)

@@ -243,9 +243,13 @@ def persist_inventory(
     )
     conn.executemany(
         f"INSERT INTO files({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
-        [[row.get(field) for field in fields] for row in rows],
+        [[row.get(field) for field in fields] for row in rows if row["change_kind"] != "unchanged"],
     )
     for row in rows:
+        # Complete per-capture inventories already live in the checksummed
+        # compressed manifest. SQLite only needs changes and current state.
+        if row["change_kind"] == "unchanged":
+            continue
         if row["change_kind"] == "deleted":
             conn.execute(
                 "UPDATE latest_files SET present=0,last_capture=? WHERE harness=? AND relpath=?",

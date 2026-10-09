@@ -91,7 +91,7 @@ from agentarchive.indexing import (
 )
 from agentarchive.search import (
     balanced_search_results, fts_query_variants, legacy_claude_raw_path, legacy_codex_raw_path,
-    normalized_fts_query, search_archive, terse_search_coordinate,
+    normalized_fts_query, search_archive, terse_search_coordinate, coverage_warnings,
 )
 from agentarchive.context import indexed_context
 from agentarchive.dedup import apply_cow_dedup, dedup_priority, duplicate_report
@@ -140,6 +140,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     verify_parser = sub.add_parser("verify", help="verify catalog, repository, and a real restored sentinel")
     verify_parser.add_argument("--read-data", action="store_true")
     sub.add_parser("status", help="show archive health and coverage")
+    compact_parser = sub.add_parser("compact", help="compact redundant indexes and verified inventory copies")
+    compact_parser.add_argument("--apply", action="store_true", help="apply the verified compaction; default is preview")
     import_parser = sub.add_parser("import-legacy", help="archive both existing analysis workspaces before cleanup")
     import_parser.add_argument("--name", default="legacy-workspaces-pre-dedup")
     search_parser = sub.add_parser("search", help="search historical and incremental evidence")
@@ -264,7 +266,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.command == "import-legacy":
             with exclusive_lock(config):
                 result = import_legacy(config, args.name)
+        elif args.command == "compact":
+            from agentarchive.maintenance import compact_catalog
+            with exclusive_lock(config):
+                result = compact_catalog(config, args.apply)
         elif args.command in ("search", "reasoning"):
+            for warning in coverage_warnings(config):
+                print(f"Archive coverage warning: {warning}", file=sys.stderr)
             found = search_archive(
                 config, args.query, args.limit, reasoning_only=args.command == "reasoning"
             )

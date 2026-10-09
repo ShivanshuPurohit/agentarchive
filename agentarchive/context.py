@@ -4,11 +4,34 @@ from __future__ import annotations
 
 import pathlib
 import re
+import hashlib
 import reasoning_index
-import sqlite3
+from privacy_filter import transcript_is_excluded, workspace_is_excluded
 from typing import Any, Dict
 
 from . import catalog, search
+
+
+def verified_live_legacy_path(config, harness, original, relative, line_no, digest):
+    """Reuse a known live coordinate only when its raw line matches the archive."""
+    root = pathlib.Path(config["sources"][harness]["root"]).expanduser().resolve()
+    if harness == "claude":
+        candidates = [root / "projects" / relative, root / relative]
+    else:
+        parts = pathlib.Path(original).parts
+        candidates = [root.joinpath(*parts[parts.index(marker):]) for marker in
+                      ("sessions", "archived_sessions") if marker in parts]
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if not candidate.is_relative_to(root) or not candidate.is_file() or transcript_is_excluded(config, candidate):
+            continue
+        with candidate.open("rb") as handle:
+            for current, raw in enumerate(handle, 1):
+                if current == line_no:
+                    if digest in {hashlib.sha256(raw).hexdigest(), hashlib.sha256(raw.rstrip(b"\r\n")).hexdigest()}:
+                        return candidate
+                    break
+    return None
 
 
 def indexed_context(
@@ -77,9 +100,7 @@ def indexed_context(
             if not definition:
                 raise ValueError("historical index is not configured for that hit ID")
             database = pathlib.Path(definition["database"]).expanduser().resolve()
-            legacy_conn = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
-            legacy_conn.row_factory = sqlite3.Row
-            legacy_conn.execute("PRAGMA query_only=ON")
+            legacy_conn = catalog.open_readonly(database)
             try:
                 if harness == "claude":
                     row = legacy_conn.execute(
@@ -106,12 +127,24 @@ def indexed_context(
                         """,
                         (int(legacy_match.group(2)),),
                     ).fetchone()
-                    coordinate_label = (
-                        str(search.legacy_codex_raw_path(database, str(row["raw_path"])))
-                        if row else ""
-                    )
+                    raw_path = search.legacy_codex_raw_path(database, str(row["raw_path"])) if row else None
+                    coordinate_label = str(raw_path) if raw_path else ""
                 if not row:
                     raise ValueError("historical hit ID is absent from the configured index")
+                columns = {item[1] for item in legacy_conn.execute("PRAGMA table_info(files)")}
+                if "cwd" in columns:
+                    owner = legacy_conn.execute("SELECT f.cwd FROM files f JOIN blocks b ON b.file_id=f.file_id "
+                                                "WHERE b.block_id=?", (int(legacy_match.group(2)),)).fetchone()
+                    if owner and workspace_is_excluded(config, owner[0]):
+                        raise ValueError("context belongs to an excluded workspace")
+                if raw_path and transcript_is_excluded(config, pathlib.Path(raw_path)):
+                    raise ValueError("context belongs to an excluded workspace")
+                if not raw_path or not pathlib.Path(raw_path).is_file():
+                    live = verified_live_legacy_path(config, harness, coordinate_label,
+                                                    row["relpath"] if harness == "claude" else "",
+                                                    row["line_no"], row["raw_sha256"])
+                    if live:
+                        coordinate_label = str(live)
                 pieces = [
                     f"{coordinate_label}:{row['line_no']}#{row['block_index']} "
                     f"[{row['role'] or '-'}/{row['kind'] or '-'}/{row['tool_name'] or '-'}]\n"
@@ -193,6 +226,9 @@ def indexed_context(
                 source_label = coordinate
             if not rows:
                 raise ValueError("no indexed block exists at that coordinate; inspect the live raw file")
+            owners = conn.execute("SELECT cwd FROM sessions WHERE harness=? AND source_relpath=?", (harness, relative))
+            if any(workspace_is_excluded(config, owner[0]) for owner in owners) or transcript_is_excluded(config, path):
+                raise ValueError("context belongs to an excluded workspace")
             pieces = []
             for row in rows:
                 pieces.append(

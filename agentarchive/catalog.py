@@ -7,11 +7,21 @@ import os
 import pathlib
 import reasoning_index
 import sqlite3
+import sys
 import time
 import uuid
 from typing import Any, Dict, Optional
 
 from . import common as utils, config as configuration
+
+
+BLOCKS_FTS_SQL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS blocks_fts USING fts5(
+    text,harness UNINDEXED,session_id UNINDEXED,source_relpath UNINDEXED,
+    line_no UNINDEXED,block_id UNINDEXED,role UNINDEXED,kind UNINDEXED,tool_name UNINDEXED,
+    content='blocks',content_rowid='block_id',tokenize='unicode61'
+)
+"""
 
 
 def catalog_path(config: Dict[str, Any]) -> pathlib.Path:
@@ -34,14 +44,19 @@ def connect_catalog(config: Dict[str, Any]) -> sqlite3.Connection:
 
 def connect_catalog_readonly(config: Dict[str, Any]) -> sqlite3.Connection:
     """Open the catalog for queries without WAL/schema/chmod side effects."""
-    path = catalog_path(config)
+    return open_readonly(catalog_path(config))
+
+
+def open_readonly(path: pathlib.Path) -> sqlite3.Connection:
+    """Read a catalog or restored historical index, including checkpointed WAL files."""
+    path = path.expanduser().resolve()
     for attempt in range(3):
         conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=60)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA query_only=ON")
-            conn.execute("SELECT 1").fetchone()
+            conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
             return conn
         except sqlite3.OperationalError:
             if conn is not None:
@@ -177,18 +192,6 @@ def make_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(harness,source_relpath,line_no,block_index,text_sha256)
         );
         CREATE INDEX IF NOT EXISTS blocks_session_idx ON blocks(harness,session_id,timestamp);
-        CREATE VIRTUAL TABLE IF NOT EXISTS blocks_fts USING fts5(
-            text,
-            harness UNINDEXED,
-            session_id UNINDEXED,
-            source_relpath UNINDEXED,
-            line_no UNINDEXED,
-            block_id UNINDEXED,
-            role UNINDEXED,
-            kind UNINDEXED,
-            tool_name UNINDEXED,
-            tokenize='unicode61'
-        );
         CREATE TABLE IF NOT EXISTS references_found(
             harness TEXT NOT NULL,
             session_id TEXT NOT NULL,
@@ -242,6 +245,7 @@ def make_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    conn.execute(BLOCKS_FTS_SQL)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(indexed_files)")}
     if "tool_calls_version" not in columns:
         conn.execute(
@@ -250,18 +254,69 @@ def make_schema(conn: sqlite3.Connection) -> None:
     reasoning_index.ensure_schema(conn)
 
 
-def backup_catalog_to_stage(conn: sqlite3.Connection, stage: pathlib.Path) -> None:
-    destination = stage / "meta" / "catalog.sqlite"
-    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    backup = sqlite3.connect(str(destination))
+def _clone_checkpointed_catalog(conn: sqlite3.Connection, destination: pathlib.Path) -> bool:
+    """Clone only while a writer lock proves the main file is complete."""
+    if sys.platform != "darwin" or conn.in_transaction:
+        return False
+    source_name = conn.execute("PRAGMA database_list").fetchone()[2]
+    if not source_name:
+        return False
+    source = pathlib.Path(source_name)
+    timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    locked = False
     try:
-        conn.backup(backup)
+        # A long-lived reader/writer must select the online-backup fallback,
+        # not turn this optimization into an extra 60-second wait.
+        conn.execute("PRAGMA busy_timeout=0")
+        if conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+            return False
+        conn.execute("BEGIN IMMEDIATE")
+        locked = True
+        wal = pathlib.Path(str(source) + "-wal")
+        if wal.exists() and wal.stat().st_size:
+            return False  # A writer committed between checkpoint and lock.
+        copied = utils.run(["/bin/cp", "-c", str(source), str(destination)], check=False)
+        if copied.returncode == 0 and destination.is_file():
+            return True
+    except (OSError, sqlite3.OperationalError):
+        pass
+    finally:
+        if locked:
+            conn.rollback()
+        conn.execute(f"PRAGMA busy_timeout={int(timeout)}")
+    if destination.is_file():
+        destination.unlink()  # Only an incomplete generated clone.
+    return False
+
+
+def validate_catalog_snapshot(path: pathlib.Path) -> None:
+    backup = open_readonly(path)
+    try:
         result = backup.execute("PRAGMA quick_check").fetchone()
         if not result or result[0] != "ok":
             raise RuntimeError(f"catalog backup quick_check returned {result}")
     finally:
         backup.close()
+
+
+def backup_catalog_to_stage(conn: sqlite3.Connection, stage: pathlib.Path, *, validate: bool = True) -> Dict[str, Any]:
+    if conn.in_transaction:
+        raise RuntimeError("commit catalog changes before taking its recovery snapshot")
+    destination = stage / "meta" / "catalog.sqlite"
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cloned = _clone_checkpointed_catalog(conn, destination)
+    backup = sqlite3.connect(str(destination))
+    try:
+        if not cloned:
+            conn.backup(backup)
+        backup.execute("PRAGMA journal_mode=DELETE")
+    finally:
+        backup.close()
     os.chmod(destination, 0o600)
+    if validate:
+        validate_catalog_snapshot(destination)
+    return {"method": "checkpointed-apfs-clone" if cloned else "sqlite-online-backup",
+            "integrity": "ok" if validate else "pending", "bytes": destination.stat().st_size}
 
 
 def record_health(conn: sqlite3.Connection, kind: str, status: str, detail: str) -> None:

@@ -401,8 +401,10 @@ def index_capture(
                             stats["tool_calls_added"] += 1
                         block_id = int(cursor.lastrowid)
                         conn.execute(
-                            "INSERT INTO blocks_fts VALUES(?,?,?,?,?,?,?,?,?)",
+                            "INSERT INTO blocks_fts(rowid,text,harness,session_id,source_relpath,line_no,"
+                            "block_id,role,kind,tool_name) VALUES(?,?,?,?,?,?,?,?,?,?)",
                             (
+                                block_id,
                                 text,
                                 harness,
                                 session_id,

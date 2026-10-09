@@ -141,16 +141,31 @@ restores the recorded sentinel. Repository checks automatically run Restic's
 stale-only `unlock` and retry once after lock exit code 11; active locks remain
 locked and make the command fail.
 
-Manual backup validates the consistent catalog snapshot before storing it and
-runs the repository check once during final verification. Its result labels
+Manual backup validates the consistent catalog snapshot while Restic stores it,
+then runs the repository check once during final verification. A capture cannot
+become successful before both writing and full catalog validation finish. Its result labels
 `verify.catalog_basis` as `checked capture snapshot`; standalone `verify` checks
 the current live catalog. This avoids two full catalog scans and two repository
 checks in one backup without omitting the captured-catalog integrity check or
 sentinel restore.
 
+On APFS, the catalog snapshot uses a filesystem clone only after a successful
+WAL checkpoint and while holding a SQLite writer lock. A concurrent writer,
+busy checkpoint, or unavailable clone selects SQLite's online-backup fallback.
+Both paths keep the complete catalog integrity check, repository check, and
+restored-sentinel verification. `capture.catalog_snapshot` reports the method,
+size, and integrity result; no configured source is omitted to gain speed.
+
 Search is deliberately two-stage and token-bounded. The first command returns
-at most eight deduplicated 18-token snippets by default, prefers all-signal
-matches, and uses broad OR retrieval only when the strict query has no result.
+at most eight deduplicated 40-token passages by default. It preserves quoted
+phrases and explicit Boolean queries, removes common question words, and tries
+whole-word inflections and nearby term groups. Broader retrieval runs only when
+the precise candidates do not contain a usable local match. Source diversity
+does not override relevance; copied search responses and injected instructions
+are demoted. More candidates are fetched before deduplication so repeated
+rollouts do not consume the result budget. No embedding service is used.
+Proximity groups run separately to avoid SQLite snippet failures when multiple
+`NEAR` groups are combined with `OR`; their results are merged before ranking.
 Its text view emits stable hit IDs plus compact session coordinates; selected
 `context` output and `search --json` retain full absolute provenance. Use
 `context` only on a selected hit ID or coordinate; it reads indexed blocks,
@@ -173,10 +188,36 @@ scanning. Capture results report `indexing.files_backfilled` and
 `indexing.tool_calls_added`; calls can be retrieved with the existing `search`
 and `context` commands.
 
-SQLite FTS5 is the retrieval backend. At the present catalog size it is not the
-bottleneck; relevance ranking, duplicate collapse, and bounded expansion are.
+SQLite FTS5 is the retrieval backend. Search uses its bounded `rank` query path
+and ranks the returned passages across all configured harnesses and historical
+indexes. Missing historical indexes produce a coverage warning, not a silent
+claim that no evidence exists. Exact session IDs use the catalogs rather than
+recursively walking live transcript roots.
 Semantic embeddings should be added only if a checked golden-query suite shows
 lexical recall failures that exact plus short-synonym queries cannot recover.
+
+Run a source-checked, private query set against the real CLI with
+`python3 scripts/evaluate_search.py .local/queries.json --output .local/results.json`.
+Each JSON case has `id`, `query`, and `expected_hit_ids` (or
+`expected_text_sha256` for byte-identical occurrences, `expected_session_id`, or
+`expect_empty`). `--cli`, `--config`, and `--repeat` support comparisons against
+a frozen corpus; `--check` requires each known answer in the first five results.
+Keep real queries and source coordinates outside the published tree.
+
+New catalogs keep transcript text once: FTS reads from `blocks` instead of
+maintaining a second text copy. Captures store file changes in SQLite and retain
+the complete, checksummed inventory in each compressed manifest. Recovery
+audits use those manifests to prove unchanged files are present even if an
+earlier snapshot is no longer retained.
+
+`agent-archive compact` previews a migration for older catalogs.
+`agent-archive compact --apply` verifies exact manifest replacements, saves a
+temporary consistent rollback catalog, rebuilds the external-content search
+index, and reclaims unused pages. Every evidence block ID/hash must survive;
+unverified inventory rows remain. It never prunes backup snapshots or rollouts.
+An interrupted operation retains `catalog.compact-rollback.sqlite` for inspection
+before retrying. A successful run removes that temporary copy and saves its
+verification receipt under the archive's `audits/` directory.
 
 `reasoning` searches Claude plaintext `thinking` blocks plus the readable Codex
 reasoning surfaces that the ordinary message extractor previously missed:

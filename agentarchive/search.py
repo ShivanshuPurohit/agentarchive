@@ -1,17 +1,15 @@
-"""Bounded, balanced search across incremental and historical indexes."""
+"""Bounded, relevance-ranked search across incremental and historical indexes."""
 
 from __future__ import annotations
 
-import collections
-import contextlib
 import pathlib
 import re
 import reasoning_index
 import sqlite3
-from privacy_filter import transcript_is_excluded
+from privacy_filter import transcript_is_excluded, workspace_is_excluded
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from . import catalog
+from . import catalog, retrieval
 from .common import (
     UUID_RE,
 )
@@ -43,97 +41,32 @@ def normalized_fts_query(query: str) -> str:
 
 
 def fts_query_variants(query: str) -> List[str]:
-    """Try a high-signal intersection before the broad natural-language fallback."""
-    broad = normalized_fts_query(query)
+    """Preserve explicit syntax; strip question words before bounded expansion."""
     if re.search(r"\s(?:AND|OR|NOT|NEAR)\s", query):
-        return [broad]
-    terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_][A-Za-z0-9_.:/-]*", query)))
-    stopwords = {
-        "a", "an", "and", "for", "from", "in", "is", "latest", "of", "on",
-        "or", "stable", "the", "to", "versus", "vs", "with",
-    }
-    signal = [term for term in terms if term.casefold() not in stopwords]
-    if len(signal) < 2:
-        return [broad]
-    strict = " AND ".join('"' + term.replace('"', '""') + '"' for term in signal)
-    return [strict, broad] if strict != broad else [broad]
+        return [normalized_fts_query(query)]
+    atoms = [retrieval.atom(term) for term in retrieval.terms(query)]
+    if not atoms:
+        return []
+    strict, broad = " AND ".join(atoms), " OR ".join(atoms)
+    if strict == broad:
+        return [strict]
+    variants = [strict]
+    signal = retrieval.terms(query)
+    if len(signal) >= 3:
+        # Preserve nearby noun/identifier groups when a question adds verbs
+        # that the answer does not repeat. No unbounded single-word OR scan.
+        quoted = ['"' + word.strip('"').replace('"', '""') + '"' for word in signal]
+        # OR-combined NEAR groups can make SQLite's cross-row snippet cursor
+        # report SQLITE_CORRUPT_VTAB on a healthy index. Merge bounded results
+        # from separate groups instead; keep all groups before broad fallback.
+        variants.extend("NEAR(" + " ".join(quoted[i:i + 3]) + ", 12)"
+                        for i in range(len(quoted) - 2))
+    return variants + [broad]
 
 
 def balanced_search_results(results: Sequence[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    """Rank match quality first, prefer raw evidence, then diversify harnesses."""
-    if limit <= 0:
-        return []
-    if any(int(item.get("match_tier", 1)) == 0 for item in results) and any(
-        int(item.get("match_tier", 1)) > 0 for item in results
-    ):
-        # Broad OR retrieval exists to prevent false no-hits. Once the
-        # high-signal intersection returns evidence, broad matches add tokens
-        # and distractors rather than useful recall. A caller can issue a
-        # shorter synonym query or explicit OR when expansion is intentional.
-        results = [item for item in results if int(item.get("match_tier", 1)) == 0]
-    compact: List[Dict[str, Any]] = []
-    seen_units: set[Tuple[str, str, str]] = set()
-    seen_excerpts: set[str] = set()
-    for item in results:
-        unit = str(
-            item.get("session_id") or item.get("path") or item.get("source_relpath")
-            or item.get("relpath") or item.get("database") or item.get("excerpt") or ""
-        )
-        key = (
-            str(item.get("harness") or "unknown"),
-            str(item.get("source") or "unknown"),
-            unit,
-        )
-        if key in seen_units:
-            continue
-        excerpt_key = re.sub(r"\W+", " ", str(item.get("excerpt") or "").casefold()).strip()
-        if excerpt_key and excerpt_key in seen_excerpts:
-            continue
-        seen_units.add(key)
-        if excerpt_key:
-            seen_excerpts.add(excerpt_key)
-        compact.append(item)
-    results = compact
-    balanced: List[Dict[str, Any]] = []
-    tiers = sorted({int(item.get("match_tier", 1)) for item in results})
-    for tier in tiers:
-        # Summaries route an investigation but do not displace transcript
-        # evidence. They fill only when all raw buckets for this match tier are
-        # exhausted.
-        for source_phase in (("incremental", "historical"), ("summary",)):
-            buckets: Dict[Tuple[str, str], List[Dict[str, Any]]] = collections.defaultdict(list)
-            for item in results:
-                if (
-                    int(item.get("match_tier", 1)) == tier
-                    and str(item.get("source") or "unknown") in source_phase
-                ):
-                    buckets[(str(item.get("harness") or "unknown"), str(item.get("source") or "unknown"))].append(item)
-            preferred = [
-                (harness, source)
-                for source in source_phase
-                for harness in ("claude", "codex")
-            ]
-            order = [key for key in preferred if key in buckets]
-            order.extend(sorted(key for key in buckets if key not in order))
-            positions = {key: 0 for key in order}
-            while len(balanced) < limit:
-                emitted = False
-                for key in order:
-                    position = positions[key]
-                    if position >= len(buckets[key]):
-                        continue
-                    balanced.append(buckets[key][position])
-                    positions[key] += 1
-                    emitted = True
-                    if len(balanced) >= limit:
-                        break
-                if not emitted:
-                    break
-            if len(balanced) >= limit:
-                break
-        if len(balanced) >= limit:
-            break
-    return balanced
+    """Compatibility entry point; relevance precedes source diversity."""
+    return retrieval.ranked_results(results, limit)
 
 
 def legacy_claude_raw_path(database: pathlib.Path, relpath: str) -> Optional[pathlib.Path]:
@@ -171,191 +104,251 @@ def legacy_codex_raw_path(database: pathlib.Path, raw_path: str) -> pathlib.Path
     return original
 
 
+def coverage_warnings(config: Dict[str, Any]) -> List[str]:
+    """Do not silently turn unavailable history into a negative search result."""
+    return [
+        f"{entry['harness']} historical index is unavailable: {entry['database']}"
+        for entry in config.get("legacy_indexes", [])
+        if not pathlib.Path(entry["database"]).expanduser().is_file()
+    ]
+
+
+def _session_matches(
+    config: Dict[str, Any], conn: sqlite3.Connection, session_id: str, limit: int,
+) -> List[Dict[str, Any]]:
+    # The filtered catalog already owns source discovery. Never walk live
+    # transcript roots just to resolve a known session UUID.
+    rows = conn.execute(
+        "SELECT harness,source_relpath,cwd FROM sessions WHERE session_id=?",
+        (session_id,),
+    ).fetchall()
+    if not rows:
+        harnesses = list(config["sources"])
+        rows = conn.execute(
+            "SELECT DISTINCT harness,source_relpath,NULL AS cwd FROM blocks WHERE harness IN (" +
+            ",".join("?" for _ in harnesses) + ") AND session_id=? LIMIT ?",
+            [*harnesses, session_id, limit],
+        ).fetchall()
+    results = []
+    for row in rows:
+        if row["harness"] not in config["sources"] or workspace_is_excluded(config, row["cwd"]):
+            continue
+        path = (pathlib.Path(config["sources"][row["harness"]]["root"]) / row["source_relpath"]).resolve()
+        if transcript_is_excluded(config, path):
+            continue
+        results.append({
+            "source": "incremental", "match_tier": -1, "match_mode": "session-id",
+            "harness": row["harness"], "session_id": session_id,
+            "source_relpath": row["source_relpath"], "line_no": None,
+            "excerpt": "exact raw transcript filename match", "raw_path": str(path),
+        })
+    if not results:
+        for entry in config.get("legacy_indexes", []):
+            database = pathlib.Path(entry["database"]).expanduser()
+            if not database.is_file():
+                continue
+            legacy = catalog.open_readonly(database)
+            try:
+                if entry["harness"] == "codex":
+                    found = legacy.execute("SELECT * FROM files WHERE thread_id=? LIMIT ?", (session_id, limit))
+                else:
+                    found = legacy.execute("SELECT * FROM files WHERE relpath LIKE ? LIMIT ?", ("%" + session_id + "%", limit))
+                for record in found:
+                    item = dict(record)
+                    if workspace_is_excluded(config, item.get("cwd")):
+                        continue
+                    block = legacy.execute("SELECT block_id,line_no FROM blocks WHERE file_id=? ORDER BY block_id LIMIT 1",
+                                           (item["file_id"],)).fetchone() if entry["harness"] == "claude" else legacy.execute(
+                        "SELECT b.block_id,e.line_no FROM blocks b JOIN events e ON e.event_id=b.event_id "
+                        "WHERE b.file_id=? ORDER BY b.block_id LIMIT 1", (item["file_id"],),
+                    ).fetchone()
+                    if not block:
+                        continue
+                    raw = (legacy_claude_raw_path(database, item["relpath"]) if entry["harness"] == "claude"
+                           else legacy_codex_raw_path(database, item["source_path"]))
+                    if raw and transcript_is_excluded(config, raw):
+                        continue
+                    results.append({"source": "historical", "harness": entry["harness"], "database": str(database),
+                                    "session_id": session_id, "match_tier": -1, "match_mode": "session-id",
+                                    "hit_id": f"l:{entry['harness']}:{block['block_id']}", "line_no": block["line_no"],
+                                    "raw_path": str(raw or item["relpath"]), "excerpt": "exact historical session; indexed context available"})
+            finally:
+                legacy.close()
+    return results[:limit]
+
+
+def _incremental_candidates(
+    config: Dict[str, Any], conn: sqlite3.Connection, match: str, count: int, reasoning_only: bool,
+) -> List[Dict[str, Any]]:
+    harnesses = list(config["sources"])
+    placeholders = ",".join("?" for _ in harnesses)
+    rows = conn.execute(
+        f"""
+        SELECT harness,session_id,source_relpath,line_no,block_id,role,kind,tool_name,
+               snippet(blocks_fts,0,'[',']','…',40) AS excerpt,rank AS bm25_score,
+               length(text) AS _chars,substr(text,1,3000) AS _prefix
+        FROM blocks_fts WHERE blocks_fts MATCH ? AND harness IN ({placeholders})
+          AND (?=0 OR kind IN ('thinking','reasoning','reasoning_summary','agent_reasoning'))
+        ORDER BY rank LIMIT ?
+        """, [match, *harnesses, int(reasoning_only), count],
+    ).fetchall()
+    results = []
+    for rank, row in enumerate(rows):
+        item = {"source": "incremental", "_rank": rank, **dict(row)}
+        item["hit_id"] = f"i:{row['harness']}:{row['block_id']}"
+        item["raw_path"] = str(pathlib.Path(config["sources"][row["harness"]]["root"]) / row["source_relpath"])
+        results.append(item)
+    if rows:
+        ids = [row["block_id"] for row in rows]
+        metadata = {
+            row["block_id"]: dict(row) for row in conn.execute(
+                "SELECT block_id,timestamp,text_sha256 FROM blocks WHERE block_id IN (" +
+                ",".join("?" for _ in ids) + ")", ids,
+            )
+        }
+        for item in results:
+            item.update(metadata.get(item["block_id"], {}))
+    if "codex" in config["sources"]:
+        for rank, row in enumerate(reasoning_index.search(conn, match, count)):
+            item = {"source": "incremental", "harness": "codex", "role": "reasoning", "_rank": rank, **row}
+            item["hit_id"] = f"r:codex:{row['payload_id']}"
+            item["raw_path"] = str(pathlib.Path(config["sources"]["codex"]["root"]) / row["source_relpath"])
+            results.append(item)
+    return results
+
+
+def _historical_candidates(
+    config: Dict[str, Any], match: str, count: int, reasoning_only: bool,
+) -> List[Dict[str, Any]]:
+    results = []
+    for legacy in config.get("legacy_indexes", []):
+        database = pathlib.Path(legacy["database"]).expanduser().resolve()
+        if not database.is_file():
+            continue
+        conn = catalog.open_readonly(database)
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(files)")}
+            workspace = "f.cwd" if "cwd" in columns else "NULL"
+            if legacy["harness"] == "claude":
+                sql = f"""
+                    SELECT b.block_id,b.relpath,b.line_no,b.role,b.block_type AS kind,
+                           b.tool_name,b.text_sha256,e.timestamp,{workspace} AS cwd,
+                           snippet(blocks_fts,0,'[',']','…',40) AS excerpt,
+                           rank AS bm25_score,length(b.text) AS _chars,substr(b.text,1,3000) AS _prefix
+                    FROM blocks_fts JOIN blocks b ON b.block_id=blocks_fts.rowid
+                    JOIN events e ON e.event_id=b.event_id JOIN files f ON f.file_id=b.file_id
+                    WHERE blocks_fts MATCH ?
+                      AND (?=0 OR b.block_type IN ('thinking','reasoning','reasoning_summary','agent_reasoning'))
+                    ORDER BY rank LIMIT ?
+                """
+            else:
+                sql = f"""
+                    SELECT b.block_id,b.file_thread_id AS session_id,b.timestamp,b.role,
+                           b.kind,b.name AS tool_name,b.text_sha256,e.line_no,f.source_path AS raw_path,{workspace} AS cwd,
+                           snippet(blocks_fts,0,'[',']','…',40) AS excerpt,
+                           rank AS bm25_score,length(b.text) AS _chars,substr(b.text,1,3000) AS _prefix
+                    FROM blocks_fts JOIN blocks b ON b.block_id=blocks_fts.rowid
+                    JOIN events e ON e.event_id=b.event_id JOIN files f ON f.file_id=b.file_id
+                    WHERE blocks_fts MATCH ?
+                      AND (?=0 OR b.kind IN ('thinking','reasoning','reasoning_summary','agent_reasoning'))
+                    ORDER BY rank LIMIT ?
+                """
+            for rank, row in enumerate(conn.execute(sql, (match, int(reasoning_only), count))):
+                item = {"source": "historical", "harness": legacy["harness"],
+                        "database": str(database), "_rank": rank, **dict(row)}
+                item["hit_id"] = f"l:{legacy['harness']}:{row['block_id']}"
+                if legacy["harness"] == "claude":
+                    path = legacy_claude_raw_path(database, str(row["relpath"]))
+                    if path:
+                        item["raw_path"] = str(path)
+                    session = UUID_RE.search(str(row["relpath"]))
+                    if session:
+                        item["session_id"] = session.group(0)
+                elif row["raw_path"]:
+                    item["raw_path"] = str(legacy_codex_raw_path(database, str(row["raw_path"])))
+                results.append(item)
+        finally:
+            conn.close()
+    return results
+
+
+def _summary_candidates(conn: sqlite3.Connection, match: str, count: int) -> List[Dict[str, Any]]:
+    return [
+        {"source": "summary", "hit_id": f"s:{row['document_id']}", "_rank": rank, **dict(row)}
+        for rank, row in enumerate(conn.execute(
+            """
+            SELECT harness,path,title,document_id,
+                   snippet(documents_fts,0,'[',']','…',40) AS excerpt,rank AS bm25_score,
+                   length(text) AS _chars,substr(text,1,3000) AS _prefix
+            FROM documents_fts WHERE documents_fts MATCH ? ORDER BY rank LIMIT ?
+            """, (match, count),
+        ))
+    ]
+
+
 def search_archive(
     config: Dict[str, Any], query: str, limit: int = 8, reasoning_only: bool = False,
 ) -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
+    if not query.strip() or limit <= 0:
+        return []
+    if len(query) > 1024 or limit > 100:
+        raise ValueError("search supports at most 1024 query characters and 100 results")
     matches = fts_query_variants(query)
-    seen: set[Tuple[Any, ...]] = set()
-
-    def append_unique(item: Dict[str, Any]) -> None:
-        key = (
-            item.get("source"), item.get("harness"), item.get("session_id"),
-            item.get("source_relpath"), item.get("path"), item.get("database"),
-            item.get("line_no"), item.get("excerpt"),
-        )
-        if key not in seen:
-            seen.add(key)
-            results.append(item)
-
+    query_terms = [term for term in retrieval.terms(query) if term not in {"AND", "OR", "NOT", "NEAR"}]
+    results: Dict[str, Dict[str, Any]] = {}
+    # Fetch enough candidates BEFORE collapsing inherited and repeated blocks.
+    candidate_count = min(512, max(64, limit * 16))
     conn = catalog.connect_catalog_readonly(config)
     try:
         exact_session = query.strip()
-        if re.fullmatch(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-            exact_session,
-        ):
-            for harness in ("claude", "codex"):
-                root = pathlib.Path(config["sources"][harness]["root"]).expanduser().resolve()
-                search_roots = (
-                    (root / "projects",) if harness == "claude"
-                    else (root / "sessions", root / "archived_sessions")
-                )
-                paths: List[pathlib.Path] = []
-                for search_root in search_roots:
-                    if search_root.is_dir():
-                        paths.extend(search_root.rglob(f"*{exact_session}*.jsonl"))
-                for path in sorted(set(paths))[:limit]:
-                    if transcript_is_excluded(config, path):
+        if UUID_RE.fullmatch(exact_session):
+            found = _session_matches(config, conn, exact_session.lower(), limit)
+            if found:
+                return found
+        workspaces = {
+            (row["harness"], row["session_id"]): row["cwd"]
+            for row in conn.execute("SELECT harness,session_id,cwd FROM sessions")
+        }
+        privacy_cache: Dict[str, bool] = {}
+
+        def append(rows: Sequence[Dict[str, Any]], tier: int, mode: str) -> None:
+            for item in rows:
+                cwd = item.get("cwd") or workspaces.get((item.get("harness"), item.get("session_id")))
+                if workspace_is_excluded(config, cwd):
+                    continue
+                item["cwd"] = cwd
+                path = str(item.get("raw_path") or "")
+                if path:
+                    if path not in privacy_cache:
+                        privacy_cache[path] = transcript_is_excluded(config, pathlib.Path(path))
+                    if privacy_cache[path]:
                         continue
-                    relative = str(path.relative_to(root))
-                    item = {
-                        "source": "incremental", "match_tier": -1,
-                        "match_mode": "session-id", "harness": harness,
-                        "session_id": exact_session, "source_relpath": relative,
-                        "line_no": None,
-                        "excerpt": "exact raw transcript filename match",
-                        "raw_path": str(path),
-                    }
-                    append_unique(item)
-            if results:
-                return results[:limit]
-        for match_tier, match in enumerate(matches):
-            match_mode = "all-signal" if len(matches) > 1 and match_tier == 0 else "broad"
+                item.update(match_tier=tier, match_mode=mode)
+                item["_quality"] = retrieval.passage_quality(item, query_terms, query)
+                key = item["hit_id"]
+                if key not in results or item["_quality"] > results[key]["_quality"]:
+                    results[key] = item
+
+        for tier, match in enumerate(matches):
+            mode = "all-signal" if len(matches) > 1 and tier == 0 else "broad"
+            if match.startswith("NEAR("):
+                mode = "nearby"
             if len(matches) == 1 and re.search(r"\s(?:AND|OR|NOT|NEAR)\s", query):
-                match_mode = "explicit"
-            for harness in ("claude", "codex"):
-                for row in conn.execute(
-                    """
-                    SELECT harness,session_id,source_relpath,line_no,block_id,role,kind,tool_name,
-                           snippet(blocks_fts,0,'[',']','…',18) AS excerpt,
-                           bm25(blocks_fts) AS bm25_score
-                    FROM blocks_fts WHERE blocks_fts MATCH ? AND harness=?
-                      AND (?=0 OR kind IN ('thinking','reasoning','reasoning_summary','agent_reasoning'))
-                    ORDER BY bm25(blocks_fts) LIMIT ?
-                    """,
-                    (match, harness, int(reasoning_only), limit),
-                ):
-                    item = {
-                        "source": "incremental", "match_tier": match_tier,
-                        "match_mode": match_mode, **dict(row),
-                    }
-                    item["hit_id"] = f"i:{harness}:{row['block_id']}"
-                    item["raw_path"] = str(
-                        pathlib.Path(config["sources"][harness]["root"]) / row["source_relpath"]
-                    )
-                    append_unique(item)
-                if harness == "codex":
-                    for row in reasoning_index.search(conn, match, limit):
-                        item = {
-                            "source": "incremental", "harness": "codex",
-                            "role": "reasoning", "match_tier": match_tier,
-                            "match_mode": match_mode, **row,
-                        }
-                        item["hit_id"] = f"r:codex:{row['payload_id']}"
-                        item["raw_path"] = str(
-                            pathlib.Path(config["sources"]["codex"]["root"])
-                            / row["source_relpath"]
-                        )
-                        append_unique(item)
-                if not reasoning_only:
-                    for row in conn.execute(
-                        """
-                        SELECT harness,path,title,document_id,
-                               snippet(documents_fts,0,'[',']','…',18) AS excerpt,
-                               bm25(documents_fts) AS bm25_score
-                        FROM documents_fts WHERE documents_fts MATCH ? AND harness=?
-                        ORDER BY bm25(documents_fts) LIMIT ?
-                        """,
-                        (match, harness, limit),
-                    ):
-                        item = {
-                            "source": "summary", "match_tier": match_tier,
-                            "match_mode": match_mode, **dict(row),
-                        }
-                        item["hit_id"] = f"s:{row['document_id']}"
-                        append_unique(item)
+                mode = "explicit"
+            append(_incremental_candidates(config, conn, match, candidate_count, reasoning_only), tier, mode)
+            append(_historical_candidates(config, match, candidate_count, reasoning_only), tier, mode)
+            ranked = balanced_search_results(list(results.values()), limit)
+            # A useful nearby match makes a broad query unnecessary. Incidental
+            # co-occurrence in a huge block or an old search result does not.
+            if (ranked and ranked[0].get("match_coverage", 0) == 1 and ranked[0]["_quality"] >= 0.9
+                    and tier >= len(matches) - 2):
+                break
+        if not reasoning_only and matches and len(results) < limit:
+            append(_summary_candidates(conn, matches[0], candidate_count), 0, "all-signal")
+        ranked = balanced_search_results(list(results.values()), limit)
+        return [{key: value for key, value in item.items() if not key.startswith("_")} for item in ranked]
     finally:
         conn.close()
-    for legacy in config.get("legacy_indexes", []):
-        database = pathlib.Path(legacy["database"]).expanduser()
-        if not database.is_file():
-            continue
-        legacy_conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
-        legacy_conn.row_factory = sqlite3.Row
-        try:
-            if legacy["harness"] == "claude":
-                sql = """
-                    SELECT blocks_fts.rowid AS block_id,b.relpath,b.line_no,b.role,
-                           b.block_type AS kind,b.tool_name,
-                           snippet(blocks_fts,0,'[',']','…',18) AS excerpt
-                    FROM blocks_fts JOIN blocks b ON b.block_id=blocks_fts.rowid
-                    WHERE blocks_fts MATCH ?
-                      AND (?=0 OR b.block_type IN ('thinking','reasoning','reasoning_summary','agent_reasoning'))
-                    ORDER BY bm25(blocks_fts) LIMIT ?
-                """
-            else:
-                sql = """
-                    SELECT b.block_id,b.file_thread_id AS session_id,b.timestamp,b.role,
-                           b.kind,b.name AS tool_name,e.line_no,f.source_path AS raw_path,
-                           snippet(blocks_fts,0,'[',']','…',18) AS excerpt
-                    FROM blocks_fts
-                    JOIN blocks b ON b.block_id=blocks_fts.rowid
-                    JOIN events e ON e.event_id=b.event_id
-                    JOIN files f ON f.file_id=b.file_id
-                    WHERE blocks_fts MATCH ?
-                      AND (?=0 OR b.kind IN ('thinking','reasoning','reasoning_summary','agent_reasoning'))
-                    ORDER BY bm25(blocks_fts) LIMIT ?
-                """
-            for match_tier, match in enumerate(matches):
-                match_mode = "all-signal" if len(matches) > 1 and match_tier == 0 else "broad"
-                if len(matches) == 1 and re.search(r"\s(?:AND|OR|NOT|NEAR)\s", query):
-                    match_mode = "explicit"
-                for row in legacy_conn.execute(sql, (match, int(reasoning_only), limit)):
-                    item = {
-                        "source": "historical",
-                        "match_tier": match_tier,
-                        "match_mode": match_mode,
-                        "harness": legacy["harness"],
-                        "database": str(database),
-                        **dict(row),
-                    }
-                    item["hit_id"] = f"l:{legacy['harness']}:{row['block_id']}"
-                    if legacy["harness"] == "claude":
-                        raw_path = legacy_claude_raw_path(database, str(row["relpath"]))
-                        if raw_path:
-                            item["raw_path"] = str(raw_path)
-                    elif row["raw_path"]:
-                        item["raw_path"] = str(
-                            legacy_codex_raw_path(database, str(row["raw_path"]))
-                        )
-                    append_unique(item)
-        except sqlite3.OperationalError:
-            # A literal fallback is friendlier for punctuation-heavy IDs.
-            quoted = '"' + query.replace('"', '""') + '"'
-            with contextlib.suppress(sqlite3.OperationalError):
-                for row in legacy_conn.execute(sql, (quoted, int(reasoning_only), limit)):
-                    item = {
-                        "source": "historical",
-                        "match_tier": len(matches),
-                        "match_mode": "literal-fallback",
-                        "harness": legacy["harness"],
-                        "database": str(database),
-                        **dict(row),
-                    }
-                    item["hit_id"] = f"l:{legacy['harness']}:{row['block_id']}"
-                    if legacy["harness"] == "claude":
-                        raw_path = legacy_claude_raw_path(database, str(row["relpath"]))
-                        if raw_path:
-                            item["raw_path"] = str(raw_path)
-                    elif row["raw_path"]:
-                        item["raw_path"] = str(
-                            legacy_codex_raw_path(database, str(row["raw_path"]))
-                        )
-                    append_unique(item)
-        finally:
-            legacy_conn.close()
-    return balanced_search_results(results, limit)
 
 
 def terse_search_coordinate(item: Dict[str, Any]) -> str:

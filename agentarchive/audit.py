@@ -20,6 +20,7 @@ from .common import DURABLE_CAPTURE_STATUSES
 def archived_file_indexes(
     conn: sqlite3.Connection,
     snapshot_ids: set[str],
+    manifest_root: Optional[pathlib.Path] = None,
 ) -> Tuple[
     Dict[Tuple[str, str], List[Dict[str, Any]]],
     Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]],
@@ -37,12 +38,34 @@ def archived_file_indexes(
     )
     by_path: Dict[Tuple[str, str], List[Dict[str, Any]]] = collections.defaultdict(list)
     by_content: Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]] = collections.defaultdict(list)
-    for row in rows:
-        value = dict(row)
+    def include(value: Dict[str, Any]) -> None:
         if str(value["restic_snapshot"]) not in snapshot_ids:
-            continue
+            return
         by_path[(str(value["harness"]), str(value["relpath"]))].append(value)
         by_content[(str(value["file_type"]), value.get("sha256"))].append(value)
+    for row in rows:
+        include(dict(row))
+    # Delta-only catalog inventories must still prove that an unchanged file
+    # exists in a retained snapshot after its original snapshot is pruned.
+    if manifest_root is not None:
+        captures = conn.execute(
+            f"SELECT capture_id,restic_snapshot,status,manifest_sha256 FROM captures "
+            f"WHERE status IN ({placeholders})", DURABLE_CAPTURE_STATUSES,
+        )
+        for capture in captures:
+            if capture["restic_snapshot"] not in snapshot_ids:
+                continue
+            path = manifest_root / f"{capture['capture_id']}.jsonl.gz"
+            if not path.is_file():
+                continue
+            if not capture["manifest_sha256"] or utils.sha256_file(path) != capture["manifest_sha256"]:
+                raise RuntimeError(f"capture manifest checksum mismatch: {path}")
+            with gzip.open(path, "rt", encoding="utf-8") as handle:
+                for line in handle:
+                    value = json.loads(line)
+                    if value.get("change_kind") == "unchanged":
+                        include({**value, "capture_id": capture["capture_id"],
+                                 "restic_snapshot": capture["restic_snapshot"], "status": capture["status"]})
     return by_path, by_content
 
 
@@ -262,7 +285,7 @@ def staging_candidates(config: Dict[str, Any], conn: sqlite3.Connection) -> List
 
 def audit_staging(config: Dict[str, Any], conn: sqlite3.Connection) -> Dict[str, Any]:
     snapshot_ids = storage.known_restic_snapshot_ids(config)
-    by_path, by_content = archived_file_indexes(conn, snapshot_ids)
+    by_path, by_content = archived_file_indexes(conn, snapshot_ids, configuration.state_root(config) / "manifests")
     audits: List[Dict[str, Any]] = []
     summaries: List[Dict[str, Any]] = []
     for stage in staging_candidates(config, conn):

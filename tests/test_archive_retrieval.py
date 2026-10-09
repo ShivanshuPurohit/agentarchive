@@ -9,6 +9,18 @@ import agent_archive as aa
 from agentarchive import catalog
 
 
+def insert_search_rows(conn, rows):
+    for text, harness, session, path, line, _, role, kind, tool in rows:
+        block_id = conn.execute(
+            "INSERT INTO blocks(harness,session_id,source_relpath,line_no,block_index,role,kind,tool_name,"
+            "text,text_sha256,capture_id) VALUES(?,?,?,?,0,?,?,?,?,?,'fixture')",
+            (harness, session, path, line, role, kind, tool, text, text),
+        ).lastrowid
+        conn.execute("INSERT INTO blocks_fts(rowid,text,harness,session_id,source_relpath,line_no,"
+                     "block_id,role,kind,tool_name) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                     (block_id, text, harness, session, path, line, block_id, role, kind, tool))
+
+
 class ArchiveRetrievalTests(unittest.TestCase):
     def test_legacy_codex_raw_path_relocates_a_moved_archive_tree(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -41,9 +53,7 @@ class ArchiveRetrievalTests(unittest.TestCase):
             config["legacy_indexes"] = []
             aa.ensure_private_tree(root / "state")
             conn = aa.connect_catalog(config)
-            conn.execute(
-                "INSERT INTO blocks_fts VALUES(?,?,?,?,?,?,?,?,?)",
-                (
+            insert_search_rows(conn, [(
                     "The recorded fix uses NCU 2026.2.1, not stale 2025.3.1.",
                     "codex",
                     "session-1",
@@ -53,8 +63,7 @@ class ArchiveRetrievalTests(unittest.TestCase):
                     "assistant",
                     "text",
                     "",
-                ),
-            )
+                )])
             conn.commit()
             conn.close()
             catalog = aa.catalog_path(config)
@@ -91,7 +100,7 @@ class ArchiveRetrievalTests(unittest.TestCase):
                 ("This only says versus.", "claude", "noise", "noise.jsonl", 1, 1, "assistant", "text", ""),
                 ("NCU 2025.3.1 was stale; 2026.2 fixed TP4.", "codex", "answer", "answer.jsonl", 53, 1, "assistant", "text", ""),
             )
-            conn.executemany("INSERT INTO blocks_fts VALUES(?,?,?,?,?,?,?,?,?)", rows)
+            insert_search_rows(conn, rows)
             conn.commit()
             conn.close()
             results = aa.search_archive(
