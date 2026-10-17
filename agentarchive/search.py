@@ -7,6 +7,7 @@ import re
 import reasoning_index
 import sqlite3
 from privacy_filter import transcript_is_excluded, workspace_is_excluded
+from transcript_model import source_variant
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import catalog, retrieval
@@ -126,7 +127,7 @@ def _session_matches(
         harnesses = list(config["sources"])
         rows = conn.execute(
             "SELECT DISTINCT harness,source_relpath,NULL AS cwd FROM blocks WHERE harness IN (" +
-            ",".join("?" for _ in harnesses) + ") AND session_id=? LIMIT ?",
+            ",".join("?" for _ in harnesses) + ") AND session_id=? ORDER BY source_relpath LIMIT ?",
             [*harnesses, session_id, limit],
         ).fetchall()
     results = []
@@ -310,6 +311,9 @@ def search_archive(
             for row in conn.execute("SELECT harness,session_id,cwd FROM sessions")
         }
         privacy_cache: Dict[str, bool] = {}
+        # One hit for an event both a transcript and its kept original hold: the
+        # canonical file's, whichever candidate arrived first.
+        twins: Dict[Tuple[Any, ...], Tuple[str, bool]] = {}
 
         def append(rows: Sequence[Dict[str, Any]], tier: int, mode: str) -> None:
             for item in rows:
@@ -326,6 +330,17 @@ def search_archive(
                 item.update(match_tier=tier, match_mode=mode)
                 item["_quality"] = retrieval.passage_quality(item, query_terms, query)
                 key = item["hit_id"]
+                twin = (item.get("harness"), item.get("session_id"), item.get("kind"), item.get("text_sha256"))
+                canonical = source_variant(str(item.get("source_relpath") or "")) == "canonical"
+                held = twins.get(twin) if twin[-1] else None
+                if held and held[0] != key:
+                    if not canonical:
+                        continue
+                    if not held[1]:
+                        results.pop(held[0], None)
+                        twins[twin] = (key, True)
+                elif twin[-1]:
+                    twins[twin] = (key, canonical)
                 if key not in results or item["_quality"] > results[key]["_quality"]:
                     results[key] = item
 
@@ -363,6 +378,8 @@ def terse_search_coordinate(item: Dict[str, Any]) -> str:
         session = str(item.get("session_id") or "")
         match = UUID_RE.search(session) or UUID_RE.search(raw)
         coordinate = match.group(0) if match else pathlib.Path(raw).name or raw
+        if source_variant(raw) != "canonical":
+            coordinate = f"{coordinate}.pre-import"
     if item.get("line_no"):
         coordinate = f"{coordinate}:{item['line_no']}"
     return coordinate

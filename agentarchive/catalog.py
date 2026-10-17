@@ -152,6 +152,7 @@ def make_schema(conn: sqlite3.Connection) -> None:
             prefix_sha256 TEXT,
             last_capture TEXT NOT NULL,
             tool_calls_version INTEGER NOT NULL DEFAULT 0,
+            usage_version INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(harness,relpath)
         );
         CREATE TABLE IF NOT EXISTS sessions(
@@ -192,6 +193,22 @@ def make_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(harness,source_relpath,line_no,block_index,text_sha256)
         );
         CREATE INDEX IF NOT EXISTS blocks_session_idx ON blocks(harness,session_id,timestamp);
+        CREATE TABLE IF NOT EXISTS usage(
+            harness TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            source_relpath TEXT NOT NULL,
+            identity TEXT NOT NULL,
+            line_no INTEGER NOT NULL,
+            timestamp TEXT,
+            model TEXT,
+            input_tokens INTEGER,
+            cached_tokens INTEGER,
+            cache_write_tokens INTEGER,
+            output_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            PRIMARY KEY(harness,source_relpath,identity)
+        );
+        CREATE INDEX IF NOT EXISTS usage_session_idx ON usage(harness,session_id,timestamp);
         CREATE TABLE IF NOT EXISTS references_found(
             harness TEXT NOT NULL,
             session_id TEXT NOT NULL,
@@ -251,6 +268,8 @@ def make_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE indexed_files ADD COLUMN tool_calls_version INTEGER NOT NULL DEFAULT 0"
         )
+    if "usage_version" not in columns:
+        conn.execute("ALTER TABLE indexed_files ADD COLUMN usage_version INTEGER NOT NULL DEFAULT 0")
     reasoning_index.ensure_schema(conn)
 
 

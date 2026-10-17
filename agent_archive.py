@@ -207,6 +207,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     restore_parser = sub.add_parser("restore", help="restore a restic snapshot")
     restore_parser.add_argument("snapshot")
     restore_parser.add_argument("target")
+    receipts_parser = sub.add_parser(
+        "receipts", help="read deleted transcripts' model-call receipts back from the snapshots that still hold them"
+    )
+    receipts_parser.add_argument("--dry-run", action="store_true", help="count what the snapshots hold, restoring nothing")
     record_parser = sub.add_parser("record", help="add a curated decision/failure/outcome record")
     record_parser.add_argument("--kind", required=True, choices=("decision", "failure", "unresolved", "outcome", "supersession"))
     record_parser.add_argument("--title", required=True)
@@ -348,6 +352,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pathlib.Path(args.target).mkdir(parents=True, exist_ok=True)
             restored = restic(config, ["restore", args.snapshot, "--target", args.target])
             result = {"snapshot": args.snapshot, "target": args.target, "output": restored.stdout}
+        elif args.command == "receipts":
+            from agentarchive.receipts import backfill
+            with exclusive_lock(config):
+                conn = connect_catalog(config)
+                try:
+                    result = backfill(config, conn, dry_run=args.dry_run)
+                finally:
+                    conn.close()
         elif args.command == "record":
             result = record_item(config, args)
         else:

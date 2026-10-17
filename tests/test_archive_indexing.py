@@ -56,12 +56,12 @@ class ArchiveIndexingTests(unittest.TestCase):
                 """
                 INSERT INTO indexed_files(
                     harness,relpath,size_bytes,mtime_ns,byte_offset,line_no,
-                    prefix_sha256,last_capture,tool_calls_version
-                ) VALUES('codex','sessions/rollout.jsonl',?,?,?,?,?,'prior',?)
+                    prefix_sha256,last_capture,tool_calls_version,usage_version
+                ) VALUES('codex','sessions/rollout.jsonl',?,?,?,?,?,'prior',?,?)
                 """,
                 (
                     info.st_size, info.st_mtime_ns, info.st_size, 1,
-                    aa.prefix_sha256(rollout), indexing.TOOL_CALLS_VERSION,
+                    aa.prefix_sha256(rollout), indexing.TOOL_CALLS_VERSION, indexing.USAGE_VERSION,
                 ),
             )
             conn.commit()

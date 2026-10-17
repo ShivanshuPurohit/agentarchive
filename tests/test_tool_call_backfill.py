@@ -83,7 +83,7 @@ class ToolCallBackfillTests(unittest.TestCase):
         count = self.conn.execute("SELECT count(*) FROM blocks").fetchone()[0]
         with mock.patch.object(indexing, "extract_event", side_effect=AssertionError("rescanned")):
             repeated = self.index("repeat")
-        self.assertEqual(repeated, {"files_scanned": 0, "files_backfilled": 0, "tool_calls_added": 0})
+        self.assertEqual(repeated, {"files_scanned": 0, "files_backfilled": 0, "tool_calls_added": 0, "model_calls_added": 0})
         self.assertEqual(self.conn.execute("SELECT count(*) FROM blocks").fetchone()[0], count)
 
     def test_failed_backfill_rolls_back_evidence_and_checkpoint_then_retries(self):
@@ -147,6 +147,6 @@ class ToolCallBackfillTests(unittest.TestCase):
         """)
         aa.make_schema(conn)
         row = conn.execute("SELECT * FROM indexed_files").fetchone()
-        self.assertEqual(row, ("codex", "old.jsonl", 100, 200, 100, 3, "hash", "old", "retained-extra", 0))
+        self.assertEqual(row, ("codex", "old.jsonl", 100, 200, 100, 3, "hash", "old", "retained-extra", 0, 0))
         aa.make_schema(conn)
         self.assertEqual(conn.execute("SELECT * FROM indexed_files").fetchone(), row)

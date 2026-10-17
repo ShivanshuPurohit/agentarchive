@@ -97,6 +97,15 @@ hidden from the live transcript viewer. Adding a root also purges any matching
 derived catalog rows and capsules. Live files under `~/.claude` and `~/.codex`
 are never changed; their retention remains the user's decision.
 
+Claude Desktop's "Import Claude Code CLI sessions" rewrites a transcript in place
+and keeps the original beside it as `<id>.jsonl.pre-import`. Capture keeps both.
+Indexing treats the original as a source variant of the same session: its events,
+including the thinking the rewrite removed, are searchable and expandable at their
+own raw coordinate, shown as `<session>.pre-import:LINE`, while the session row,
+capsule and viewer sidebar follow the canonical `.jsonl`. An event both files hold
+is reported once, from the canonical file. The excluded-workspace boundary applies
+to both files alike.
+
 ## Installed locations
 
 - Program and private state: `~/Library/Application Support/AgentArchive/`
@@ -179,6 +188,25 @@ after upgrading to 1.6.0 revisits previously scanned transcripts once, including
 unchanged files, and adds missing calls. Tool calls are checked even before the
 historical date cutoff. This uses retained, privacy-filtered source files; it
 cannot recreate a transcript absent from those sources.
+
+Model-call receipts are indexed the same way into `usage`: one row per model
+call with its model, timestamp and input, cached, cache-written, output and
+reasoning token counts, read through the viewer's receipt parser so repeated
+Claude content-block lines and mirrored Codex `token_count` events count once
+and inherited Codex parent receipts are left out. Only the canonical transcript
+feeds it; a kept `.pre-import` original would double its calls. A session
+captured under two paths (a hook-inbox copy beside its transcript, a Codex
+rollout before and after archiving) repeats its identities under each, so a
+reader counts each `(harness, session_id, identity)` once. The per-file
+`indexed_files.usage_version` checkpoint backfills previously scanned
+transcripts once on the next capture, as the tool-call checkpoint did.
+
+Transcripts scanned before the usage table existed and gone from disk since get
+their receipts back with `agent-archive receipts` (`--dry-run` counts first):
+for each one the newest version held by a snapshot the repository still has is
+restored under the state root, read with the same parser, and stamped. A
+transcript whose every version was in a snapshot since forgotten is counted as
+unrecoverable and keeps carrying no tokens.
 
 The per-file `indexed_files.tool_calls_version` checkpoint records that backfill.
 Existing block IDs and output rows are retained. New evidence and upgrade

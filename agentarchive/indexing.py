@@ -9,6 +9,8 @@ import json
 import pathlib
 import sqlite3
 from privacy_filter import workspace_is_excluded
+from transcript_model import TRANSCRIPT_SUFFIXES, source_variant
+from transcript_usage import UsageIndex
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import common as utils, reports
@@ -16,6 +18,8 @@ from .common import COMMIT_RE, GITHUB_ISSUE_RE, GITHUB_PR_RE, UUID_RE
 
 
 TOOL_CALLS_VERSION = 1
+# Bump to read every indexed transcript again for model-call receipts (the usage table).
+USAGE_VERSION = 1
 CODEX_TOOL_TYPES = {
     "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output",
 }
@@ -169,18 +173,25 @@ def prefix_sha256(path: pathlib.Path, amount: int = 65536) -> str:
     return digest.hexdigest()
 
 
+# Transcript roots inside a capture's `data` tree: the harness whose transcripts they hold, the
+# folder the inventory files them under, and the subfolder every indexed relpath starts with.
+TRANSCRIPT_ROOTS = (
+    ("claude", "claude", "projects"),
+    ("claude", "hook_inbox", "claude"),
+    ("codex", "codex", "sessions"),
+    ("codex", "codex", "archived_sessions"),
+)
+
+
 def indexable_jsonl(stage: pathlib.Path) -> Iterator[Tuple[str, pathlib.Path, str]]:
-    roots = [
-        ("claude", stage / "data" / "claude" / "projects", stage / "data" / "claude"),
-        ("claude", stage / "data" / "hook_inbox" / "claude", stage / "data" / "hook_inbox"),
-        ("codex", stage / "data" / "codex" / "sessions", stage / "data" / "codex"),
-        ("codex", stage / "data" / "codex" / "archived_sessions", stage / "data" / "codex"),
-    ]
-    for harness, root, relative_base in roots:
+    """Yield every transcript, and the `.pre-import` original Claude Desktop keeps beside one it rewrote."""
+    for harness, folder, subfolder in TRANSCRIPT_ROOTS:
+        relative_base = stage / "data" / folder
+        root = relative_base / subfolder
         if not root.is_dir():
             continue
-        for path in sorted(root.rglob("*.jsonl")):
-            if path.is_file() and ".sync-conflict-" not in path.name:
+        for path in sorted(root.rglob("*.jsonl*")):
+            if path.is_file() and path.name.endswith(TRANSCRIPT_SUFFIXES) and ".sync-conflict-" not in path.name:
                 yield harness, path, path.relative_to(relative_base).as_posix()
 
 
@@ -197,14 +208,16 @@ def purge_excluded_sessions(config: Dict[str, Any], conn: sqlite3.Connection) ->
         ).fetchall()
         conn.executemany("DELETE FROM blocks_fts WHERE block_id=?", block_ids)
         relpaths = {str(row["source_relpath"] or "")}
-        relpaths.update(str(item[0]) for item in conn.execute(
-            "SELECT DISTINCT source_relpath FROM reasoning_occurrences "
-            "WHERE harness=? AND session_id=?", key
-        ))
+        # Every file that fed the session: a kept original and subagent files included.
+        for table in ("blocks", "reasoning_occurrences", "usage"):
+            relpaths.update(str(item[0]) for item in conn.execute(
+                f"SELECT DISTINCT source_relpath FROM {table} WHERE harness=? AND session_id=?", key
+            ))
         conn.execute("DELETE FROM blocks WHERE harness=? AND session_id=?", key)
         conn.execute("DELETE FROM references_found WHERE harness=? AND session_id=?", key)
         conn.execute("DELETE FROM summary_jobs WHERE harness=? AND session_id=?", key)
         conn.execute("DELETE FROM reasoning_occurrences WHERE harness=? AND session_id=?", key)
+        conn.execute("DELETE FROM usage WHERE harness=? AND session_id=?", key)
         for relpath in filter(None, relpaths):
             conn.execute(
                 "DELETE FROM indexed_files WHERE harness=? AND relpath=?",
@@ -257,6 +270,36 @@ def insert_reference(
         )
 
 
+def write_receipts(
+    conn: sqlite3.Connection,
+    harness: str,
+    relative: str,
+    session_id: Optional[str],
+    usage: UsageIndex,
+    replace: bool,
+) -> int:
+    """Write a file's own receipts: replacing drops its rows first, else each updates by identity."""
+    if replace:
+        conn.execute("DELETE FROM usage WHERE harness=? AND source_relpath=?", (harness, relative))
+    written = 0
+    for step in usage.steps:
+        if step["ownership"] != "native":
+            continue
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO usage(
+                harness,session_id,source_relpath,identity,line_no,timestamp,model,
+                input_tokens,cached_tokens,cache_write_tokens,output_tokens,reasoning_tokens
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (harness, session_id, relative, step["identity"], step["line"], step["timestamp"],
+             step["model"], step["input"], step["cached"], step["cache_write"], step["output"],
+             step["reasoning"]),
+        )
+        written += 1
+    return written
+
+
 def index_capture(
     config: Dict[str, Any],
     conn: sqlite3.Connection,
@@ -266,7 +309,7 @@ def index_capture(
 ) -> Dict[str, int]:
     """Append evidence and backfill old tool calls atomically, retaining hit IDs."""
     with conn:
-        stats = {"files_scanned": 0, "files_backfilled": 0, "tool_calls_added": 0}
+        stats = {"files_scanned": 0, "files_backfilled": 0, "tool_calls_added": 0, "model_calls_added": 0}
         hashes = {
             (row["harness"], row["relpath"]): row.get("sha256")
             for row in inventory_rows
@@ -275,17 +318,22 @@ def index_capture(
         changed_sessions: set = set()
         session_state: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for harness, path, relative in indexable_jsonl(stage):
+            # A kept original indexes its events at their own coordinate; the session row,
+            # capsule and viewer sidebar follow the canonical file alone.
+            canonical = source_variant(relative) == "canonical"
             info = path.stat()
             prefix = prefix_sha256(path)
             prior = conn.execute(
                 "SELECT * FROM indexed_files WHERE harness=? AND relpath=?",
                 (harness, relative),
             ).fetchone()
-            upgrade_tools = bool(prior and prior["tool_calls_version"] < TOOL_CALLS_VERSION)
-            if not upgrade_tools and prior and prior["size_bytes"] == info.st_size and prior["mtime_ns"] == info.st_mtime_ns:
+            upgrade = bool(prior and (
+                prior["tool_calls_version"] < TOOL_CALLS_VERSION or prior["usage_version"] < USAGE_VERSION
+            ))
+            if not upgrade and prior and prior["size_bytes"] == info.st_size and prior["mtime_ns"] == info.st_mtime_ns:
                 continue
             stats["files_scanned"] += 1
-            if upgrade_tools:
+            if upgrade:
                 stats["files_backfilled"] += 1
             offset = 0
             line_no = 0
@@ -297,13 +345,21 @@ def index_capture(
                 and info.st_size >= prior["byte_offset"]
             ):
                 initial_scan = False
-                if upgrade_tools:
+                if upgrade:
                     backfill_until = int(prior["byte_offset"])
                 else:
                     offset = int(prior["byte_offset"])
                     line_no = int(prior["line_no"])
             cutoff = str(config["sources"][harness].get("legacy_cutoff_utc") or "")
             safe_offset = offset
+            # Model-call receipts come from the canonical file alone; a kept original would double them.
+            usage = UsageIndex() if canonical else None
+            file_session = None
+            last_model = None
+            if usage is not None and offset and harness == "codex":
+                # A resumed scan still needs the rollout's own identity to leave inherited receipts out.
+                with path.open("rb") as head, contextlib.suppress(Exception):
+                    usage.provenance(json.loads(head.readline()), 1)
             with path.open("rb") as handle:
                 handle.seek(offset)
                 while True:
@@ -326,6 +382,10 @@ def index_capture(
                         harness, relative, obj
                     )
                     timestamp = metadata.get("timestamp")
+                    file_session = session_id
+                    last_model = model or last_model
+                    if usage is not None:
+                        usage.consume(harness, obj, line_no, [], last_model)
                     # Replay only tool calls in a previously indexed prefix. Calls
                     # predating a legacy cutoff also belong in this complete tool
                     # index; other old content stays in its historical index.
@@ -335,8 +395,8 @@ def index_capture(
                     if tools_only and not any(block[0] == "tool_call" for block in blocks):
                         continue
                     key = (harness, session_id)
-                    state = session_state.get(key)
-                    if state is None:
+                    state = session_state.get(key) if canonical else None
+                    if canonical and state is None:
                         existing = conn.execute(
                             "SELECT * FROM sessions WHERE harness=? AND session_id=?",
                             key,
@@ -359,14 +419,15 @@ def index_capture(
                             "source_relpath": relative,
                         }
                         session_state[key] = state
-                    if timestamp:
+                    if state and timestamp:
                         if not state["started_utc"] or str(timestamp) < str(state["started_utc"]):
                             state["started_utc"] = str(timestamp)
                         if not state["ended_utc"] or str(timestamp) > str(state["ended_utc"]):
                             state["ended_utc"] = str(timestamp)
-                    state["cwd"] = cwd or state["cwd"]
-                    state["model"] = model or state["model"]
-                    state["source_relpath"] = relative
+                    if state:
+                        state["cwd"] = cwd or state["cwd"]
+                        state["model"] = model or state["model"]
+                        state["source_relpath"] = relative
                     for block_index, (kind, tool_name, text, role) in enumerate(blocks):
                         if tools_only and kind != "tool_call":
                             continue
@@ -417,6 +478,8 @@ def index_capture(
                             ),
                         )
                         insert_reference(conn, harness, session_id, block_id, text, current_capture)
+                        if state is None:
+                            continue
                         changed_sessions.add(key)
                         if role == "user" and kind not in {"tool_result", "tool_call"}:
                             if not state["first_prompt"]:
@@ -427,18 +490,21 @@ def index_capture(
                         if kind == "tool_call" or tool_name:
                             name = tool_name or "unknown"
                             state["tool_counts"][name] = int(state["tool_counts"].get(name, 0)) + 1
+            if usage is not None:
+                # A scan from the top replaces the file's rows; a resumed one adds or updates by identity.
+                stats["model_calls_added"] += write_receipts(conn, harness, relative, file_session, usage, not offset)
             conn.execute(
                 """
-                INSERT INTO indexed_files(harness,relpath,size_bytes,mtime_ns,byte_offset,line_no,prefix_sha256,last_capture,tool_calls_version)
-                VALUES(?,?,?,?,?,?,?,?,?)
+                INSERT INTO indexed_files(harness,relpath,size_bytes,mtime_ns,byte_offset,line_no,prefix_sha256,last_capture,tool_calls_version,usage_version)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(harness,relpath) DO UPDATE SET
                     size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,
                     byte_offset=excluded.byte_offset,line_no=excluded.line_no,
                     prefix_sha256=excluded.prefix_sha256,last_capture=excluded.last_capture,
-                    tool_calls_version=excluded.tool_calls_version
+                    tool_calls_version=excluded.tool_calls_version,usage_version=excluded.usage_version
                 """,
                 (harness, relative, info.st_size, info.st_mtime_ns, safe_offset, line_no, prefix,
-                 current_capture, TOOL_CALLS_VERSION),
+                 current_capture, TOOL_CALLS_VERSION, USAGE_VERSION),
             )
         for (harness, session_id), state in session_state.items():
             source_hash = hashes.get((harness, state["source_relpath"]))

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from privacy_filter import transcript_is_excluded, workspace_is_excluded
-from transcript_model import IndexCache, flatten, transcript_page
+from transcript_model import TRANSCRIPT_SUFFIXES, IndexCache, flatten, source_variant, transcript_page
 from transcript_media import load_asset
 
 REGISTRY_REFRESH_SECONDS = 300
@@ -244,7 +244,7 @@ class Registry:
             conn.close()
         for coordinate in coordinates:
             harness, rel = coordinate["harness"], coordinate["relpath"]
-            if harness not in ("claude", "codex") or not rel.endswith(".jsonl"):
+            if harness not in ("claude", "codex") or not rel.endswith(TRANSCRIPT_SUFFIXES):
                 continue
             captured = harness == "claude" and rel.startswith("claude/")
             root = (pathlib.Path(self.config["state_root"]) / "inbox" if captured else
@@ -287,6 +287,9 @@ class Registry:
                     kind = "subagent"
                 if not title and kind == "main":
                     title = _codex_prompt(path)
+            # A kept original opens from a search hit; the sidebar lists the canonical file.
+            if source_variant(rel) != "canonical":
+                kind = "pre-import"
             self._add(Source("", harness, path, rel, owner, root_id, parent, kind,
                              "captured" if captured else "archived" if "archived_sessions" in rel else "live",
                              title, project, model, updated))
@@ -394,7 +397,7 @@ class Registry:
         with self._refresh_lock:
             sources = tuple(self.sources.values())
         for source in sources:
-            if source.kind in {"subagent", "workflow"} and not children:
+            if source.kind == "pre-import" or (source.kind in {"subagent", "workflow"} and not children):
                 continue
             if harness and source.harness != harness:
                 continue

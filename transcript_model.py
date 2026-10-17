@@ -22,6 +22,13 @@ from transcript_usage import UsageIndex
 MAX_RECORD = 32 * 1024 * 1024
 PREVIEW_CHARS = 6000
 OPAQUE_KEYS = {"encrypted_content", "signature"}
+# A transcript, and the original Claude Desktop keeps beside one it rewrote on import.
+TRANSCRIPT_SUFFIXES = (".jsonl", ".jsonl.pre-import")
+
+
+def source_variant(relpath: str) -> str:
+    """Name a transcript file's variant: `canonical`, or `pre-import` for the kept original."""
+    return "pre-import" if relpath.endswith(".jsonl.pre-import") else "canonical"
 
 
 def _opaque(value: Any, label: str) -> str:
